@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# PoC data/outputs (large, regenerable via scripts/)
+data/
+runs/
+*.pt
+*.onnx
+*.tflite
+

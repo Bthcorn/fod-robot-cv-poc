@@ -1,0 +1,21 @@
+[project]
+name = "cv-poc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ai-edge-litert>=2.1.2",
+    "coremltools>=9.0",
+    "litert-torch>=0.8.0",
+    "onnx>=1.22.0",
+    "onnxruntime>=1.28.0",
+    "onnxslim>=0.1.95",
+    "opencv-python>=5.0.0.93",
+    "ultralytics>=8.4.115",
+]
+
+[dependency-groups]
+dev = [
+    "gdown>=6.1.0",
+]
