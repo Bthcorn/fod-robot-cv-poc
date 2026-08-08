@@ -9,7 +9,7 @@ not the images -- the actual data lives on Google Drive, linked from its README.
 Remap: FOD-A's 31 VOC categories collapse to a 4-class scheme. PRD FR-3's
 committed targets (nail, screw, bolt) each get their own class, everything else
 fastener-adjacent (washer, nut, combo types) becomes `unknown`. This is a PoC
-experiment/comparison -- PRD v4 still specifies training a single
+experiment/comparison -- PRD FR-3 specifies training a single
 `metal_fastener` class and recovering per-class recall from the seeding log.
 The result is a subset for the PoC train/eval smoke test, not the real dataset.
 """
@@ -39,7 +39,7 @@ CLASS_MAP = {
     "BoltNutSet": ("unknown", 3),
 }
 CLASS_NAMES = {cid: name for name, cid in CLASS_MAP.values()}
-SUBSET_SIZE = 600  # PoC smoke test, not the real ~2000-2500 own-image dataset (PRD S10)
+SUBSET_SIZE = 600  # PoC smoke test, not the real ~2000-2500 own-image dataset (PRD §10)
 VAL_FRACTION = 0.15
 OUT_DIR = DATA_DIR / "yolo-subset"
 

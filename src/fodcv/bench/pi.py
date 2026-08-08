@@ -1,4 +1,4 @@
-"""Runtime benchmark on the real Pi 5 -- the measurement PRD S10/M-5 defers to.
+"""Runtime benchmark on the real Pi 5 -- the measurement PRD M-5 defers to.
 
 Published Pi 5 numbers contradict each other: LearnOpenCV (YOLO11n @640) ranks
 OpenVINO fastest (80.93 ms) and NCNN slowest (292.10 ms); Ultralytics' Pi page
@@ -54,6 +54,7 @@ from fodcv.matrix import (
     FORMATS,
     IMGSZ,
     PRECISIONS,
+    claim_artifact,
     size_bytes,
     supported,
     takes_calibration,
@@ -200,7 +201,12 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
         quantize=quantize,
         data=str(calib) if takes_calibration(fmt, quantize) else None,
     )
-    return exported, "exported"
+    # Claim it, exactly as the Mac exporter does. Skipping this here put a fresh
+    # export back into Ultralytics' own namespace, where the next cell can
+    # overwrite it -- an FP32 LiteRT export landing on a genuinely quantized
+    # best_int8.tflite, which is the silent wrong-INT8 bug claim_artifact exists
+    # to prevent.
+    return claim_artifact(exported, fmt, label), "exported"
 
 
 def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib) -> dict:
@@ -282,28 +288,6 @@ def soak(weights: str, fmt: str, label: str, frames: list, seconds: int, calib):
         writer.writeheader()
         writer.writerows(samples)
     print(f"wrote {out} -- {done} frames over {seconds}s")
-
-
-def selftest():
-    latencies = sorted([10.0, 11, 12, 13, 14, 15, 16, 17, 18, 100])
-    assert latencies[min(int(0.95 * len(latencies)), len(latencies) - 1)] == 100
-    assert statistics.median(latencies) == 14.5
-
-    pmic = """
-3V3_SYS_A current(1)=0.5000A
-3V3_SYS_V volt(1)=3.3000V
-VDD_CORE_A current(2)=2.0000A
-VDD_CORE_V volt(2)=0.7500V
-EXT5V_V volt(24)=5.0900V
-"""
-    total = parse_pmic(pmic)
-    assert abs(total - (0.5 * 3.3 + 2.0 * 0.75)) < 1e-9, total  # EXT5V has no current, must not count
-    assert parse_pmic("nonsense") is None
-
-    assert supported("ncnn", None) and supported("ncnn", 16)
-    assert not supported("ncnn", 8), "ncnn gained INT8 support -- update the README claim"
-    assert supported("litert", 8) and supported("onnx", 8)
-    print("selftest ok")
 
 
 def eval_split(run: str):

@@ -17,11 +17,7 @@ def main():
     parser.add_argument("--threads", type=int, default=None, help="intra-op threads; also use taskset")
     parser.add_argument("--no-val", action="store_true", help="skip mAP -- latency-only sweeps")
     parser.add_argument("--soak", type=int, default=0, help="seconds of sustained load instead of the matrix")
-    parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
-
-    if args.selftest:
-        return pi.selftest()
 
     pi.run(
         run=args.run,

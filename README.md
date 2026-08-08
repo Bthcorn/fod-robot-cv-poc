@@ -25,6 +25,14 @@ uv sync --extra bench                  # Pi: runtimes only
 The Mac-only converters (`coremltools`, `litert-torch`, `nncf`, `pnnx`) are in
 the `export` extra because they do not install on aarch64 at all.
 
+```
+uv run pytest
+```
+
+Covers the pure logic only — the matrix, the manifest, path/run resolution, the
+tracker and its hysteresis, the VOC→YOLO box maths, and the PMIC parser. No
+hardware, no model loads, so it runs on either machine in about a second.
+
 Run order:
 
 ```
@@ -77,7 +85,7 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 - **Export**: ONNX and TFLite/LiteRT export + reload + inference succeed. **CoreML export fails** on this coremltools/torch/M4 combination — an attention-block op can't be traced (`only 0-dimensional arrays can be converted to Python scalars`). Reproducible across runs; not an environment misconfiguration.
 - **`uv` has no `pip`**: Ultralytics' auto-install-on-missing-export-dependency fallback silently fails inside a `uv`-managed venv (no `pip` binary). Fix: pre-install every export format's deps via `uv add` rather than relying on auto-install.
 - **`litert-torch` downgrades torch**: adding it for TFLite/LiteRT export pulled torch 2.13.0 → 2.9.1 as a side effect of its pin. Confirmed MPS still works at 2.9.1, but it's a real dependency conflict worth knowing about.
-- **Class scheme comparison**: also trained a 4-class variant (`nail`/`screw`/`bolt`/`unknown`, collapsing washer/nut/combo types into `unknown`) against the PRD's canonical single `metal_fastener` class. Result: `screw` had only 4 validation instances and the lowest mAP50 (0.495) of the four classes — too sparse to trust per-class detection at this data volume. This reinforces PRD v4's actual design: train single-class, recover per-class recall from the seeding log instead of multi-class detection.
+- **Class scheme comparison**: also trained a 4-class variant (`nail`/`screw`/`bolt`/`unknown`, collapsing washer/nut/combo types into `unknown`) against the PRD's canonical single `metal_fastener` class. Result: `screw` had only 4 validation instances and the lowest mAP50 (0.495) of the four classes — too sparse to trust per-class detection at this data volume. This reinforces PRD FR-3's actual design: train single-class, recover per-class recall from the seeding log instead of multi-class detection.
 - **macOS camera permission**: `cv2.VideoCapture` needs Privacy & Security → Camera access granted to the hosting terminal app (TCC), or capture silently fails to open. Not a code bug.
 
 ## Carrying forward to robot integration
@@ -89,16 +97,16 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 - The `uv add`-every-export-dep-upfront gotcha above — it recurs for every new export format (`pnnx`, `nncf`; see v3).
 
 **PoC-only, not for real integration:**
-- FOD-A as training data — it was only ever meant to warm-start/de-risk; real training uses self-collected arena images (PRD §10/§14a, ~2000-2500 images).
+- FOD-A as training data — it was only ever meant to warm-start/de-risk; real training uses self-collected arena images (PRD §10, ~2000-2500 images).
 - The 600-image toy subset and its train/val split logic.
-- `camera_test.py` / `list_cameras.py` — Mac/OpenCV/avfoundation-specific. Real Pi 5 capture uses `picamera2` with locked exposure/AWB (PRD §6a/§10), a different code path entirely.
+- `camera_test.py` / `list_cameras.py` — Mac/OpenCV/avfoundation-specific. Real Pi 5 capture uses `picamera2` with locked exposure/AWB (PRD §9/§10), a different code path entirely.
 - CoreML export — Mac-only format, irrelevant to a Pi 5 target (and broken here anyway).
 - MPS inference speed numbers — not representative of Pi 5 CPU-only inference; real latency needs on-device measurement.
 - `litert-torch` — only needed here to test the export path; the real Pi export toolchain (NCNN/OpenVINO) has its own deps.
 
 ## v2 — angle-robustness
 
-Live testing with v1's weights showed detection confidence dropping as the camera's viewing ("gazing") angle to a fastener changes. Not a bug in the toolchain: PRD `S6a` mounts the camera **low and forward-tilted, not top-down** — a grazing view by deliberate design (more pixels-on-target at range, at the cost of perspective distortion). At that geometry, small/thin fasteners foreshorten and their specular response to light shifts with angle, both of which erode confidence — and FOD-A's own image set was shot at its own uncontrolled mix of viewpoints, not this robot's fixed geometry, so v1 never specifically learned the deployment angle. Domain gap, not a model limitation.
+Live testing with v1's weights showed detection confidence dropping as the camera's viewing ("gazing") angle to a fastener changes. Not a bug in the toolchain: PRD §9 mounts the camera **low and forward-tilted, not top-down** — a grazing view by deliberate design (more pixels-on-target at range, at the cost of perspective distortion). At that geometry, small/thin fasteners foreshorten and their specular response to light shifts with angle, both of which erode confidence — and FOD-A's own image set was shot at its own uncontrolled mix of viewpoints, not this robot's fixed geometry, so v1 never specifically learned the deployment angle. Domain gap, not a model limitation.
 
 **What changed:**
 - `train.py --angle-aug` — adds Ultralytics' native `degrees`/`shear`/`perspective`/`scale` augmentation (0/default in v1) to push the model toward viewpoint robustness. Writes to `runs/train_poc_v2`, v1's `runs/train_poc` untouched.
@@ -106,18 +114,18 @@ Live testing with v1's weights showed detection confidence dropping as the camer
 
 **v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run scripts/train.py --angle-aug` and comparing against the existing `runs/train_poc` metrics.
 
-**Camera angle research (for PRD `S17.11`, mount height `h` / tilt `θ`, currently placeholder "low ~15-30 cm"):**
+**Camera angle research (for PRD O-3, mount height `h` / tilt `θ` in §9, currently placeholder "low ~15-30 cm"):**
 - Ground-plane obstacle-detection literature: pitch should stay near 0 deg when camera height is low, growing only as height grows — a low camera pointed too steeply loses forward look-ahead distance. Near-ground stereo rigs are typically kept within 0-10 deg down from horizontal.
 - Floor-cleaning-robot patents/specs use much steeper tilt (40-90 deg) but are mounted far higher (0.6-1.1 m, or ~50 cm) than this robot's 15-30 cm target — their extra height is what makes the steep angle affordable.
 - A Faster R-CNN study varying subject angle found detector confidence swinging 0.55-1.0 from viewpoint alone, worst near-perpendicular — independent confirmation that angle-driven confidence loss is a real, measured effect, not specific to this dataset/model.
-- **Synthesis:** at `h` = 15-30 cm, the literature argues for a *shallow* tilt (roughly 10-25 deg down from horizontal), not the steep angles taller floor-cleaning robots use. Test within that band first when resolving `S17.11`.
+- **Synthesis:** at `h` = 15-30 cm, the literature argues for a *shallow* tilt (roughly 10-25 deg down from horizontal), not the steep angles taller floor-cleaning robots use. Test within that band first when resolving O-3.
 
 **Carrying forward to v3 / robot integration (not built here — hardware/data decisions the team owns):**
-- Angle-matched data collection once `S17.11` is decided — the real fix for the domain gap; shoot the ~2000-2500 self-collected training images (`S10`/`S14a`) at whatever `h`/`θ` gets chosen, not before.
+- Angle-matched data collection once O-3 is decided — the real fix for the domain gap; shoot the ~2000-2500 self-collected training images (§10) at whatever `h`/`θ` gets chosen, not before.
 - Diffuse, off-axis LED (PRD already specifies off-axis to avoid on-axis glint) — extend to explicit diffusion and measure recall **vs angle**, not just on/off, closing the existing `NEEDS MEASUREMENT` item.
 - Polarizing filter on the lens — cheap, cuts specular reflection off metal at grazing incidence directly; candidate BOM addition.
 - Oriented bounding boxes (YOLO11n-obb) for elongated fasteners at arbitrary in-plane rotation — needs re-annotation (FOD-A is axis-aligned VOC) and a new export/inference path; future/stretch, not now.
-- Inference-time TTA / multi-view ensembling — rejected: extra forward passes blow the `S6a` `v_fast` latency budget on Pi 5 CPU.
+- Inference-time TTA / multi-view ensembling — rejected: extra forward passes blow App. B.2's `v_fast` latency budget on Pi 5 CPU.
 
 ## v3 — on-device benchmark (the Pi 5 is now in hand)
 
@@ -135,7 +143,7 @@ Same board, opposite order. Neither states thread count, cooling or thermal stat
 Two things to settle on the board:
 
 - **Does INT8 help here?** Arm INT8 measures 0.8×–3.0× vs FP32, sometimes slower. And per [Raspberry Pi](https://www.raspberrypi.com/news/run-ultralytics-yolo-on-raspberry-pi-with-openvino/), "Arm platforms execute quantised models in simulation mode... an `int8` export should not be presented as a guaranteed Raspberry Pi speed path" — so **`OpenVINO INT8` (PRD FR-1) is not a real speed path** and should come off the shortlist. **LiteRT INT8 is the one to beat**: it goes through XNNPACK's actual INT8 kernels, and the Pi 5's Cortex-A76 has the `i8sdot` instruction (but not `i8mm`) to run them.
-- **Is YOLO26n worth switching to?** STAL (small-target-aware label assignment) targets PRD §7a's small-object problem directly; the NMS-free one-to-one head claims up to 43% faster CPU ONNX inference than YOLO11n and should tighten **p95** more than the median, since NMS cost scales with detection count. `postprocess_ms` isolates exactly that. Gate it on the NCNN export working — the [YOLO26 model docs](https://docs.ultralytics.com/models/yolo26/) list TensorRT/ONNX/CoreML/LiteRT/OpenVINO and do *not* mention NCNN, yet the Pi benchmark page reports YOLO26n on NCNN. Resolve before depending on it.
+- **Is YOLO26n worth switching to?** STAL (small-target-aware label assignment) targets App. B.1's pixel-floor problem directly; the NMS-free one-to-one head claims up to 43% faster CPU ONNX inference than YOLO11n and should tighten **p95** more than the median, since NMS cost scales with detection count. `postprocess_ms` isolates exactly that. Gate it on the NCNN export working — the [YOLO26 model docs](https://docs.ultralytics.com/models/yolo26/) list TensorRT/ONNX/CoreML/LiteRT/OpenVINO and do *not* mention NCNN, yet the Pi benchmark page reports YOLO26n on NCNN. Resolve before depending on it.
 
 ### Export on the Mac, benchmark on the Pi
 
@@ -191,7 +199,7 @@ Latency was also captured (`runs/bench_pi/results.csv`) but is **Apple M4, singl
 - **The mAP columns were meaningless.** The first draft exported stock COCO `yolo11n.pt`/`yolo26n.pt` and then `val()`'d them against the 4-class fastener `data.yaml`. Now defaults to the fine-tuned `best.pt` via `confidence_policy.resolve_weights()`.
 - **INT8 calibration leaked the eval set.** `data=data.yaml` calibrates on the *val* split, which is also the mAP evaluation set — that shrinks the INT8 drop AC-2 asks us to report. `export.py` now generates a `data-calib.yaml` with `val:` repointed at the train images.
 - **Ultralytics 8.4.115 changed the export API.** `int8=True` → `quantize=8` (old form still works via a deprecation shim), and `format="tflite"` → `format="litert"`.
-- **NCNN has no INT8 export path.** It is absent from Ultralytics' `INT8_FORMATS`; `quantize=8` hard-asserts. FP16 is NCNN's only quantized path, so **"NCNN INT8" in PRD §App-B.5 / FR-1 is not a buildable target** with this toolchain. The matrix reads precision support from Ultralytics' own `INT8_FORMATS`/`FP16_FORMATS` tables so it tracks the library instead of a hand-kept list. ONNX INT8, conversely, *is* supported now and was missing from the original shortlist.
+- **NCNN has no INT8 export path.** It is absent from Ultralytics' `INT8_FORMATS`; `quantize=8` hard-asserts. FP16 is NCNN's only quantized path, so **"NCNN INT8" in PRD FR-1 (and the §10 export table) is not a buildable target** with this toolchain. The matrix reads precision support from Ultralytics' own `INT8_FORMATS`/`FP16_FORMATS` tables so it tracks the library instead of a hand-kept list. ONNX INT8, conversely, *is* supported now and was missing from the original shortlist.
 - **`ncnn` the runtime ≠ the export dependency.** Ultralytics needs `pnnx` to convert, and its auto-install fails inside `uv` (no `pip`) — the same trap as above, hit again. `uv add pnnx nncf ncnn openvino mnn` up front. `nncf` (required for OpenVINO INT8) also downgraded numpy 2.5.1 → 2.4.6; torch stayed at 2.9.1.
 - **LiteRT export cannot share this lockfile at all.** Ultralytics 8.4.115 requires `litert-torch>=0.9.0`, which pins `typing-extensions<4.13` through `xdsl`, while `onnx>=1.22.0` requires `>=4.15`. Genuinely unsatisfiable — not a pin to loosen. `export.py` runs *only* the LiteRT cell in a throwaway `uv run --isolated --no-project --with litert-torch>=0.9.0` subprocess, which is how Ultralytics itself handles it (its `isolated-*` export env table). Inference is unaffected: `ai-edge-litert` 2.1.2 loads and runs the resulting `.tflite` fine despite warning that it wants 2.1.4.
 - **Artifact filenames collided silently — three different ways.** FP16 and FP32 both write `best.onnx` / `best_openvino_model/`. An ONNX INT8 export *consumes* `best.onnx` to produce `best_int8.onnx`. Worst: a LiteRT export drops several `.tflite` variants into the directory at once, so running `litert:fp32` after `litert:int8` **overwrote a genuinely quantized `best_int8.tflite` with a float one** — same filename, loads fine, ~2× the latency, and the INT8 column would have been silently wrong. Caught only by inspecting tensor dtypes (`535 float32, 0 int8`). Fixed by moving each artifact to `bench_<precision><official-suffix>` — outside the namespace Ultralytics writes into — plus a post-export size check that warns when an INT8 artifact is ≥90% the size of its FP32 twin. FP16 is off by default: a no-op for CPU-device ONNX export, and only genuinely interesting for NCNN.

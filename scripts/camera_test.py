@@ -1,7 +1,7 @@
 """Live webcam smoke test. No Pi 5 yet, so this uses the Mac's built-in/USB
 camera via OpenCV (source=0) instead of picamera2 -- just to prove
 camera->inference->display works before real hardware exists. Real capture
-on the Pi uses picamera2 with locked exposure/AWB (PRD S6a/S10), not this.
+on the Pi uses picamera2 with locked exposure/AWB (PRD §9/§10), not this.
 """
 
 import argparse

@@ -15,15 +15,14 @@ quantization and shrinks the INT8 mAP drop AC-2 asks us to report.
 
 Precision support is per-format and read from Ultralytics' own tables, so this
 tracks the library instead of a hand-kept list. Note NCNN is absent from
-INT8_FORMATS as of 8.4.115 -- FP16 is its only quantized path, despite PRD S App-B.5
-listing "NCNN INT8".
+INT8_FORMATS as of 8.4.115 -- FP16 is its only quantized path, despite PRD FR-1
+listing "NCNN INT8" as one of the three runtimes to benchmark.
 
 Run:  uv run scripts/export.py --run poc-v1
 Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -33,10 +32,10 @@ from ultralytics import YOLO
 from fodcv import manifest as mf
 from fodcv.matrix import (
     DEFAULT_PRECISIONS,
-    FMT_SUFFIX,
     FORMATS,
     IMGSZ,
     PRECISIONS,
+    claim_artifact,
     size_bytes,
     supported,
     takes_calibration,
@@ -81,31 +80,6 @@ def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
     raise RuntimeError(f"isolated litert export failed:\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}")
 
 
-def claim_artifact(path: str, fmt: str, label: str) -> str:
-    """Move the artifact to a name Ultralytics will never emit or overwrite.
-
-    ponytail: the whole matrix has to coexist on disk, and Ultralytics' output
-    names collide three different ways. FP16 and FP32 both write `best.onnx` /
-    `best_openvino_model/`. An ONNX INT8 export *consumes* `best.onnx` to make
-    `best_int8.onnx`. And a LiteRT export drops several `.tflite` variants into
-    the directory at once, so a later FP32 run silently overwrote a genuinely
-    quantized `best_int8.tflite` with a float one -- caught only by inspecting
-    tensor dtypes. Renaming just the returned path is not enough; the fix is a
-    `bench_` prefix, outside the namespace Ultralytics writes into.
-
-    Safe because AutoBackend._model_type() substring-matches the format suffix,
-    so `bench_fp32.onnx` and `bench_fp32_ncnn_model` still load.
-    """
-    p = Path(path)
-    # Keep Ultralytics' official suffix -- AutoBackend detects the format by
-    # substring, so dropping `_ncnn_model` / `_openvino_model` would break loading.
-    claimed = p.with_name(f"bench_{label}{FMT_SUFFIX[fmt]}")
-    if claimed.exists():
-        shutil.rmtree(claimed) if claimed.is_dir() else claimed.unlink()
-    p.rename(claimed)
-    return str(claimed)
-
-
 def check_quantized(manifest: dict, manifest_path: Path, formats: list[str]):
     """An INT8 artifact the size of its FP32 twin was never quantized.
 
@@ -138,7 +112,12 @@ def calib_yaml() -> Path:
     checked-in yaml would drift from data.yaml the moment remap_classes.py reruns.
     """
     out = DATASET_DIR / "data-calib.yaml"
-    out.write_text(re.sub(r"^val:.*$", "val: images/train", DATA_YAML.read_text(), flags=re.M))
+    rewritten, n = re.subn(r"^val:.*$", "val: images/train", DATA_YAML.read_text(), flags=re.M)
+    # An unchecked rewrite is the dangerous failure here: if `val:` ever stops
+    # being line-anchored the substitution is a silent no-op, INT8 calibrates on
+    # the evaluation split, and the AC-2 INT8 drop comes out flatteringly small.
+    assert n == 1, f"expected exactly one `val:` line in {DATA_YAML}, rewrote {n}"
+    out.write_text(rewritten)
     return out
 
 

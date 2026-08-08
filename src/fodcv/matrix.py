@@ -12,6 +12,7 @@ INT8_FORMATS as of 8.4.115 -- FP16 is its only quantized path, despite the PRD
 appendix listing "NCNN INT8".
 """
 
+import shutil
 from pathlib import Path
 
 from ultralytics.engine.exporter import FP16_FORMATS, INT8_FORMATS, export_formats
@@ -47,3 +48,32 @@ def size_bytes(path) -> int:
 
 def takes_calibration(fmt: str, quantize) -> bool:
     return quantize == 8 and "data" in FMT_ARGS[fmt]
+
+
+def claim_artifact(path: str, fmt: str, label: str) -> str:
+    """Move a fresh export to a name Ultralytics will never emit or overwrite.
+
+    ponytail: the whole matrix has to coexist on disk, and Ultralytics' output
+    names collide three different ways. FP16 and FP32 both write `best.onnx` /
+    `best_openvino_model/`. An ONNX INT8 export *consumes* `best.onnx` to make
+    `best_int8.onnx`. And a LiteRT export drops several `.tflite` variants into
+    the directory at once, so a later FP32 run silently overwrote a genuinely
+    quantized `best_int8.tflite` with a float one -- caught only by inspecting
+    tensor dtypes. Renaming just the returned path is not enough; the fix is a
+    `bench_` prefix, outside the namespace Ultralytics writes into.
+
+    Safe because AutoBackend._model_type() substring-matches the format suffix,
+    so `bench_fp32.onnx` and `bench_fp32_ncnn_model` still load.
+
+    Lives here, not in research/export.py, because the Pi's fallback export has
+    to go through it too -- that path skipped the claim and reintroduced exactly
+    the collision this function exists to prevent.
+    """
+    p = Path(path)
+    # Keep Ultralytics' official suffix -- AutoBackend detects the format by
+    # substring, so dropping `_ncnn_model` / `_openvino_model` would break loading.
+    claimed = p.with_name(f"bench_{label}{FMT_SUFFIX[fmt]}")
+    if claimed.exists():
+        shutil.rmtree(claimed) if claimed.is_dir() else claimed.unlink()
+    p.rename(claimed)
+    return str(claimed)

@@ -1,7 +1,7 @@
 """v2 prototype: confidence hysteresis + multi-frame temporal smoothing.
 
 Motivation: live testing showed detection confidence swings with the
-camera's gazing angle to a fastener (PRD S6a mounts the camera low and
+camera's gazing angle to a fastener (PRD §9 mounts the camera low and
 forward-tilted -- a grazing view by design). A single-frame hard threshold
 throws away a real detection the moment the angle is unfavorable. As the
 robot approaches, angle/range improve, so instead of trusting one frame:
@@ -15,7 +15,7 @@ robot approaches, angle/range improve, so instead of trusting one frame:
 
 This is a standalone demo, not wired into camera_test.py's live loop or the
 real Pi/ESP32 control path -- the actual speed-policy integration happens
-later in the robot runtime (PRD S7a/S7b).
+later in the robot runtime (PRD FR-4, budget in App. B.2).
 """
 
 import math
@@ -56,7 +56,14 @@ class Track:
 
 
 def match_tracks(tracks, detections):
-    """Greedy nearest-centroid matching. detections: list of (centroid, conf)."""
+    """Greedy nearest-centroid matching. detections: list of (centroid, conf).
+
+    Returns the surviving tracks; does not modify the list it was given. It used
+    to append new tracks to the caller's list *and* return a filtered copy, so
+    whether an evicted track was really gone depended on which of the two the
+    caller looked at.
+    """
+    survivors = []
     unmatched = list(range(len(detections)))
     for track in tracks:
         best_i, best_dist = None, MAX_MATCH_DIST
@@ -71,12 +78,11 @@ def match_tracks(tracks, detections):
             unmatched.remove(best_i)
         else:
             track.misses += 1
+        if track.misses <= MAX_MISSES:
+            survivors.append(track)
 
-    for i in unmatched:
-        centroid, conf = detections[i]
-        tracks.append(Track(centroid, conf))
-
-    return [t for t in tracks if t.misses <= MAX_MISSES]
+    survivors.extend(Track(*detections[i]) for i in unmatched)
+    return survivors
 
 
 def run(source: str = "0", show: bool = True, model_run: str = CURRENT_RUN):

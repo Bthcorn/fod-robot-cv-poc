@@ -1,11 +1,11 @@
 """Fine-tune trial: proves the train->eval loop runs end to end on this
 machine (MPS). Short run on the PoC subset -- a plumbing check, not a real
-accuracy result (real training happens later per PRD S10/S14a on the full
+accuracy result (real training happens later per PRD §10 on the full
 self-collected dataset).
 
 v2 (--angle-aug): adds viewpoint-robustness augmentation (perspective/shear/
 degrees/scale) to counter the gazing-angle confidence drop seen in live
-testing -- PRD S6a mounts the camera low/forward-tilted (grazing angle by
+testing -- PRD §9 mounts the camera low/forward-tilted (grazing angle by
 design), and FOD-A's own viewpoint mix doesn't match that geometry. Writes to
 a separate run dir so v1's results stay untouched for comparison.
 """
