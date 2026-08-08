@@ -1,6 +1,6 @@
 # FOD Robot CV — PoC
 
-De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot PRD`, v4) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
+De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot PRD v2`) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
 
 ## Layout
 
@@ -129,7 +129,7 @@ Live testing with v1's weights showed detection confidence dropping as the camer
 
 ## v3 — on-device benchmark (the Pi 5 is now in hand)
 
-Runtime benchmarking is no longer blocked. Run `uv run scripts/bench_pi.py` **on the Pi 5**; results land in `runs/bench_pi/`.
+Runtime benchmarking is no longer blocked. Run `uv run scripts/bench_pi.py --run poc-v1` **on the Pi 5**; results land in `runs/bench_pi/`.
 
 Why measure rather than cite: the published Pi 5 record contradicts itself.
 
