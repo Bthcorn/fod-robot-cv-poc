@@ -21,10 +21,13 @@ Also settles two open questions:
 
 Export happens on the Mac (scripts/export.py), not here: litert-converter has no
 aarch64 wheel, so the Pi cannot build a .tflite at all. This script reads
-exports.json next to the weights and reuses those artifacts; it only falls back
-to exporting locally when an artifact is missing.
+exports.json from artifacts/<run-id>/ and reuses those artifacts; it only falls
+back to exporting locally when one is missing. The `artifact` column is the
+regression signal -- every row should read `reused`, and an `exported` means the
+rsync missed and this cell is measuring a different file.
 
-Run on the Pi 5:
+Deploy, then run on the Pi 5:
+    rsync -a mac:cv-poc/artifacts/poc-v1/ artifacts/poc-v1/
     uv run scripts/bench_pi.py --threads 4                  # stage A, full matrix
     uv run scripts/bench_pi.py --models yolo26n.pt --precisions fp32   # stage B
     taskset -c 0-1 uv run scripts/bench_pi.py --formats ncnn --threads 2 --no-val
@@ -55,7 +58,15 @@ from fodcv.matrix import (
     supported,
     takes_calibration,
 )
-from fodcv.paths import DATA_YAML, ROOT, VAL_IMAGES, resolve_weights
+from fodcv.paths import (
+    CURRENT_RUN,
+    DATA_YAML,
+    DATASET_DIR,
+    ROOT,
+    VAL_IMAGES,
+    run_eval_yaml,
+    run_weights,
+)
 
 OUT_DIR = ROOT / "runs" / "bench_pi"
 
@@ -176,7 +187,7 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
     best_ncnn_model/), and guessing them wrong silently benchmarks the wrong file.
     """
     manifest_path = Path(weights).parent / mf.NAME
-    built = mf.built(mf.load(manifest_path), fmt, label)
+    built = mf.built(mf.load(manifest_path), manifest_path, fmt, label)
     if built:
         return str(built), "reused"
 
@@ -192,7 +203,8 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
     return exported, "exported"
 
 
-def bench_one(weights: str, fmt: str, label: str, frames: list, run_val: bool, calib) -> dict:
+def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib) -> dict:
+    """One matrix cell. `data_yaml` is None to skip mAP (latency-only sweeps)."""
     quantize = PRECISIONS[label]
     before = board_conditions()
     row = {
@@ -213,8 +225,8 @@ def bench_one(weights: str, fmt: str, label: str, frames: list, run_val: bool, c
         row.update(time_inference(model, frames))
         row["fps"] = 1000 / row["median_ms"]
         row["size_mb"] = size_bytes(path) / 1e6
-        if run_val:
-            metrics = model.val(data=str(DATA_YAML), imgsz=IMGSZ, verbose=False)
+        if data_yaml:
+            metrics = model.val(data=str(data_yaml), imgsz=IMGSZ, verbose=False)
             row["map50_95"] = metrics.box.map
             row["map50"] = metrics.box.map50
         row["status"] = "ok"
@@ -294,7 +306,25 @@ EXT5V_V volt(24)=5.0900V
     print("selftest ok")
 
 
-def run(weights=None, models=None, formats=None, precisions=None,
+def eval_split(run: str):
+    """(data.yaml, val image dir) for scoring: the run's own eval set if it has
+    one, else the full dataset.
+
+    On the Pi only the shipped `artifacts/<run>/eval/` exists -- data/ is Mac
+    side and gitignored. Pinning the eval set to the run also stops a v2
+    benchmark being scored against a v3 split by accident.
+    """
+    shipped = run_eval_yaml(run)
+    if shipped.exists():
+        return shipped, shipped.parent / "images" / "val"
+    assert DATA_YAML.exists(), (
+        f"no eval set: neither {shipped} nor {DATA_YAML}"
+        f" -- rsync artifacts/{run}/, or run remap_classes.py"
+    )
+    return DATA_YAML, VAL_IMAGES
+
+
+def run(run=CURRENT_RUN, weights=None, models=None, formats=None, precisions=None,
         threads=None, run_val=True, soak_seconds=0):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
@@ -302,14 +332,16 @@ def run(weights=None, models=None, formats=None, precisions=None,
     if threads:
         apply_threads(threads)
 
-    assert DATA_YAML.exists(), f"no dataset at {DATA_YAML} -- run remap_classes.py first"
-    image_paths = sorted(VAL_IMAGES.glob("*.jpg"))
-    assert image_paths, f"no val images in {VAL_IMAGES}"
+    data_yaml, val_images = eval_split(run)
+    image_paths = sorted(val_images.glob("*.jpg"))
+    assert image_paths, f"no val images in {val_images}"
     frames = load_images(image_paths, WARMUP + RUNS)
 
-    models = models or [weights or resolve_weights()]
-    calib = Path(models[0]).parent / "data-calib.yaml"
-    calib = calib if calib.exists() else DATA_YAML
+    models = models or [weights or str(run_weights(run))]
+    # Calibration data is Mac-side only; the fallback keeps a Pi-local export
+    # from crashing, though such a cell is already the `exported` warning sign.
+    calib = DATASET_DIR / "data-calib.yaml"
+    calib = calib if calib.exists() else data_yaml
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     conditions = board_conditions()
@@ -327,7 +359,7 @@ def run(weights=None, models=None, formats=None, precisions=None,
         for fmt in formats:
             for label in precisions:
                 print(f"\n=== {Path(model_weights).name} {fmt} {label} ===")
-                row = bench_one(model_weights, fmt, label, frames, run_val, calib)
+                row = bench_one(model_weights, fmt, label, frames, data_yaml if run_val else None, calib)
                 rows.append(row)
                 sources.append(model_weights)
                 if row["status"] == "ok":
@@ -345,7 +377,7 @@ def run(weights=None, models=None, formats=None, precisions=None,
     if first_ok and len(rows) > 1:
         first_ok, first_src = first_ok
         print(f"\n=== drift control: re-running {first_ok['format']} {first_ok['precision']} ===")
-        again = bench_one(first_src, first_ok["format"], first_ok["precision"], frames, False, calib)
+        again = bench_one(first_src, first_ok["format"], first_ok["precision"], frames, None, calib)
         if again["status"] == "ok":
             delta = (again["median_ms"] - first_ok["median_ms"]) / first_ok["median_ms"] * 100
             conditions["drift_pct"] = f"{delta:+.1f}"

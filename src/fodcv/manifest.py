@@ -8,6 +8,13 @@ artifact, or a sentinel explaining why there isn't one:
     "ncnn:int8":   "UNSUPPORTED: ncnn has no int8 export path"
     "litert:int8": "FAILED: RuntimeError: ..."
 
+Paths are stored **relative to this file**, which is what makes the run
+directory relocatable. They used to be absolute Mac paths, so after an rsync the
+Pi's `Path(entry).exists()` was false for every cell unless its checkout sat at
+the identical absolute path -- and each miss fell through to a local export,
+which on aarch64 cannot build LiteRT at all. The failure was silent: the
+benchmark just reported different numbers.
+
 Both sides used to hand-parse this format, and they disagreed: the exporter's
 resume check filtered only FAILED while every other site filtered FAILED and
 UNSUPPORTED, so an UNSUPPORTED cell read as "already built". One `built()` here
@@ -40,10 +47,23 @@ def save(manifest_path, manifest: dict):
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
-def built(manifest: dict, fmt: str, label: str):
+def built(manifest: dict, manifest_path, fmt: str, label: str):
     """The artifact path for this cell, or None if there isn't a usable one."""
     entry = manifest.get(key(fmt, label), "")
     if not entry or entry.startswith(_SENTINELS):
         return None
-    path = Path(entry)
+    path = Path(manifest_path).parent / entry
     return path if path.exists() else None
+
+
+def entry_for(artifact_path, manifest_path) -> str:
+    """How an artifact is written into the manifest: relative to the manifest.
+
+    Falls back to an absolute path if the artifact somehow lands outside the run
+    directory -- better a path that works only here than a silently broken one.
+    """
+    artifact, manifest_dir = Path(artifact_path).resolve(), Path(manifest_path).parent.resolve()
+    try:
+        return str(artifact.relative_to(manifest_dir))
+    except ValueError:
+        return str(artifact)

@@ -23,7 +23,7 @@ import math
 import cv2
 from ultralytics import YOLO
 
-from fodcv.paths import resolve_weights
+from fodcv.paths import CURRENT_RUN, resolve_weights
 
 CONFIRM_THRESH = 0.5
 CAUTION_THRESH = 0.25
@@ -79,10 +79,10 @@ def match_tracks(tracks, detections):
     return [t for t in tracks if t.misses <= MAX_MISSES]
 
 
-def run(source: str = "0", show: bool = True):
+def run(source: str = "0", show: bool = True, model_run: str = CURRENT_RUN):
     source = int(source) if str(source).isdigit() else source
 
-    weights = resolve_weights()
+    weights = resolve_weights(model_run)
     print(f"using weights: {weights}")
     print(f"CONFIRM_THRESH={CONFIRM_THRESH}  CAUTION_THRESH={CAUTION_THRESH}")
 

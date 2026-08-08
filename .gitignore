@@ -12,6 +12,9 @@ wheels/
 # PoC data/outputs (large, regenerable via scripts/)
 data/
 runs/
+# Built per run and rsynced to the Pi, not carried in git. The suffix patterns
+# below miss .mnn and the ncnn/openvino model *directories*, so ignore the tree.
+artifacts/
 *.pt
 *.onnx
 *.tflite

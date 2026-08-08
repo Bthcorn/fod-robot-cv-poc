@@ -84,6 +84,27 @@ def fastener_boxes(xml_path: Path):
     return boxes
 
 
+def write_data_yaml(data_yaml: Path, train: str = "images/train", val: str = "images/val") -> Path:
+    """Write a data.yaml with **no `path:` key**, deliberately.
+
+    Ultralytics resolves the dataset root as
+    `data.get("path") or Path(data["yaml_file"]).parent`, so omitting `path:`
+    makes every split relative to the yaml's own directory -- correct from any
+    working directory and after the tree is copied anywhere.
+
+    Note `path: .` does NOT do this: "." exists, so Ultralytics keeps it and
+    resolves the splits against the *current working directory* instead.
+    """
+    names_block = "\n".join(f"  {cid}: {name}" for cid, name in sorted(CLASS_NAMES.items()))
+    data_yaml.write_text(
+        f"train: {train}\n"
+        f"val: {val}\n"
+        "names:\n"
+        f"{names_block}\n"
+    )
+    return data_yaml
+
+
 def remap() -> Path:
     """VOC -> YOLO subset + data.yaml. Returns the data.yaml path."""
     ann_dir = VOC_ROOT / "Annotations"
@@ -120,15 +141,7 @@ def remap() -> Path:
             ]
             (OUT_DIR / "labels" / split / f"{stem}.txt").write_text("\n".join(label_lines) + "\n")
 
-    names_block = "\n".join(f"  {cid}: {name}" for cid, name in sorted(CLASS_NAMES.items()))
-    data_yaml = OUT_DIR / "data.yaml"
-    data_yaml.write_text(
-        f"path: {OUT_DIR}\n"
-        "train: images/train\n"
-        "val: images/val\n"
-        "names:\n"
-        f"{names_block}\n"
-    )
+    data_yaml = write_data_yaml(OUT_DIR / "data.yaml")
 
     print(f"train: {len(splits['train'])} images, val: {len(splits['val'])} images")
     print(f"data.yaml: {data_yaml}")

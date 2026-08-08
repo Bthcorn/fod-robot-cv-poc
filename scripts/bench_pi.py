@@ -4,11 +4,13 @@ import argparse
 
 from fodcv.bench import pi
 from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, PRECISIONS
+from fodcv.paths import CURRENT_RUN
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", default=None, help="default: newest fine-tuned best.pt")
+    parser.add_argument("--run", default=CURRENT_RUN, help=f"artifacts/<run-id> (default: {CURRENT_RUN})")
+    parser.add_argument("--weights", default=None, help="override artifacts/<run>/best.pt")
     parser.add_argument("--models", nargs="+", default=None, help="extra weights, e.g. yolo26n.pt")
     parser.add_argument("--formats", nargs="+", default=FORMATS)
     parser.add_argument("--precisions", nargs="+", default=DEFAULT_PRECISIONS, choices=list(PRECISIONS))
@@ -22,6 +24,7 @@ def main():
         return pi.selftest()
 
     pi.run(
+        run=args.run,
         weights=args.weights,
         models=args.models,
         formats=args.formats,

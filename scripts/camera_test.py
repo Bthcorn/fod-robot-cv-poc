@@ -4,18 +4,23 @@ camera->inference->display works before real hardware exists. Real capture
 on the Pi uses picamera2 with locked exposure/AWB (PRD S6a/S10), not this.
 """
 
-import sys
+import argparse
 
 from ultralytics import YOLO
 
-from fodcv.paths import resolve_weights
+from fodcv.paths import CURRENT_RUN, resolve_weights
 
 
 def main():
-    weights = resolve_weights()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("camera_index", nargs="?", type=int, default=0)
+    parser.add_argument("--run", default=CURRENT_RUN, help=f"weights from artifacts/<run-id> (default: {CURRENT_RUN})")
+    args = parser.parse_args()
+
+    weights = resolve_weights(args.run)
     print(f"using weights: {weights}")
 
-    camera_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    camera_index = args.camera_index
     model = YOLO(weights)
     # stream=True -> generator; must iterate to actually pump frames. Ctrl-C or 'q' in the window to stop.
     for _ in model.predict(source=camera_index, show=True, stream=True, imgsz=640):

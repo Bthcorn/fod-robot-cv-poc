@@ -2,11 +2,28 @@
 
 De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot PRD`, v4) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
 
+## Layout
+
+```
+src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only,
+                    bench/ measures, the top level is shared.
+scripts/            thin argparse wrappers -- the CLI, one file per command.
+tests/
+data/               dataset. Mac-side, gitignored, regenerable.
+runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
+artifacts/<run-id>/ the deploy unit: weights, exports, manifest, eval split.
+                    One rsync moves everything the Pi needs.
+```
+
 ## Setup
 
 ```
-uv sync
+uv sync --extra export --extra bench   # Mac: converters + runtimes
+uv sync --extra bench                  # Pi: runtimes only
 ```
+
+The Mac-only converters (`coremltools`, `litert-torch`, `nncf`, `pnnx`) are in
+the `export` extra because they do not install on aarch64 at all.
 
 Run order:
 
@@ -14,9 +31,16 @@ Run order:
 uv run scripts/fetch_dataset.py    # download + extract FOD-A (Pascal VOC)
 uv run scripts/remap_classes.py    # VOC -> YOLO subset + data.yaml
 uv run scripts/smoke_test.py       # stock yolo11n.pt sanity check
-uv run scripts/train.py            # fine-tune on the subset (MPS)
-uv run scripts/export.py           # build every runtime artifact + exports.json (Mac only, see v3)
+uv run scripts/train.py            # fine-tune on the subset (MPS) -> runs/train_poc
+uv run scripts/migrate_artifacts.py --from runs/train_poc --run poc-v1
+uv run scripts/export.py --run poc-v1   # runtime artifacts + exports.json (Mac only, see v3)
 ```
+
+`migrate_artifacts.py` publishes a training run: it lifts `best.pt` and any
+already-built exports out of Ultralytics' `runs/` scratch into
+`artifacts/<run-id>/`, and copies the val split in beside them. Everything
+downstream takes `--run <run-id>`, defaulting to `CURRENT_RUN` in
+`src/fodcv/paths.py` — bump that one constant when a new run supersedes the old.
 
 v2, angle-robustness (see below) -- writes to a separate run dir, doesn't touch v1:
 
@@ -40,6 +64,7 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 | `remap_classes.py` | Filters FOD-A's 31 categories down to a fastener subset, remaps to a class scheme (see Findings), writes a YOLO-format subset + `data.yaml`. |
 | `smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
 | `train.py` | Fine-tunes `yolo11n.pt` on the remapped subset (MPS, 15 epochs) — a plumbing check, not a real accuracy result. |
+| `migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`. |
 | `export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. |
 | `camera_test.py` | Live webcam smoke test (Ultralytics streaming inference), Mac-only stand-in for the Pi's real camera. |
 | `list_cameras.py` | Lists OpenCV camera indices (useful for picking the right one, e.g. an iPhone via Continuity Camera). |
@@ -116,21 +141,23 @@ Two things to settle on the board:
 
 Not a convenience — a constraint. `litert-converter` ships **no aarch64 Linux wheel**, so `format=litert` (ex-`tflite`) is buildable only on Linux x86_64 and macOS, *never on the Pi itself*. Since PRD AC-3 names TFLite INT8 as one of the three runtimes that must be measured, exporting on the Pi would have silently deleted a required runtime from the results and recorded it as a runtime failure. Inference is fine on the Pi — `ai-edge-litert` publishes aarch64 wheels with the XNNPACK runtime.
 
-So `export.py` builds every artifact here and writes `runs/train_poc/weights/exports.json`; `bench_pi.py` reads that manifest and reuses the artifacts, exporting locally only when one is missing. Each row's `artifact` column records `reused` vs `exported` — an `exported` on a LiteRT row on the Pi means the rsync missed and the number is wrong.
+So `export.py` builds every artifact here and writes `artifacts/<run-id>/exports.json`; `bench_pi.py` reads that manifest and reuses the artifacts, exporting locally only when one is missing. Each row's `artifact` column records `reused` vs `exported` — an `exported` on a LiteRT row on the Pi means the rsync missed and the number is wrong.
 
 ```
-uv run scripts/export.py                                   # Mac
-rsync -a runs/train_poc/weights/ pi:cv-poc/runs/train_poc/weights/
+uv run scripts/export.py --run poc-v1                  # Mac
+rsync -a artifacts/poc-v1/ pi:cv-poc/artifacts/poc-v1/
 ```
+
+Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/data.yaml` omits `path:` so Ultralytics resolves the splits against the yaml's own directory. The run directory therefore works at whatever absolute path it lands on. (`path: .` would *not* work — "." exists, so Ultralytics keeps it and resolves against the current working directory instead.) `artifacts/<run-id>/eval/` also carries the 90-image val split, so the Pi can score mAP without a copy of `data/`, and pins the eval set to the run it belongs to.
 
 ### Run protocol on the Pi
 
 | Stage | Command | Answers |
 |---|---|---|
-| A | `uv run scripts/bench_pi.py --threads 4` | M-5 / AC-3 ranking, AC-2 INT8 drop. Headline: LiteRT INT8 (real XNNPACK kernels) vs OpenVINO INT8 (Arm float simulation) |
-| B | `uv run scripts/bench_pi.py --models yolo26n.pt --precisions fp32` | YOLO26n's NMS-free head — watch `postprocess_ms` and p95. Stock COCO weights, so **latency only**, ignore its mAP |
-| C | `taskset -c 0-{n-1} uv run scripts/bench_pi.py --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
-| D | `uv run scripts/bench_pi.py --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
+| A | `uv run scripts/bench_pi.py --run poc-v1 --threads 4` | M-5 / AC-3 ranking, AC-2 INT8 drop. Headline: LiteRT INT8 (real XNNPACK kernels) vs OpenVINO INT8 (Arm float simulation) |
+| B | `uv run scripts/bench_pi.py --run poc-v1 --models yolo26n.pt --precisions fp32` | YOLO26n's NMS-free head — watch `postprocess_ms` and p95. Stock COCO weights, so **latency only**, ignore its mAP |
+| C | `taskset -c 0-{n-1} uv run scripts/bench_pi.py --run poc-v1 --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
+| D | `uv run scripts/bench_pi.py --run poc-v1 --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
 
 Active Cooler on for all stages. Stage C needs `taskset` as well as `--threads` because `OMP_NUM_THREADS` reaches ONNX/OpenVINO/NCNN but not the LiteRT interpreter — pinning cores constrains all five backends identically.
 
