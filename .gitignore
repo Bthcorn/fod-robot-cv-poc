@@ -16,3 +16,5 @@ runs/
 *.onnx
 *.tflite
 
+.env
+.mcp.json
