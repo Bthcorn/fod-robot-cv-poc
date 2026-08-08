@@ -9,11 +9,16 @@ src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only
                     bench/ measures, the top level is shared.
 scripts/            thin argparse wrappers -- the CLI, one file per command.
 tests/
-data/               dataset. Mac-side, gitignored, regenerable.
+data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
 artifacts/<run-id>/ the deploy unit: weights, exports, manifest, eval split.
                     One rsync moves everything the Pi needs.
 ```
+
+Two ids, same shape. A **run-id** names one trained model, a **dataset-id** names
+one prepared dataset. Both default to a constant in `src/fodcv/paths.py`
+(`CURRENT_RUN`, `CURRENT_DATASET`) and both are overridable per command with
+`--run` / `--dataset`, so nothing grows a required argument.
 
 ## Setup
 
@@ -29,26 +34,47 @@ the `export` extra because they do not install on aarch64 at all.
 uv run pytest
 ```
 
-Covers the pure logic only — the matrix, the manifest, path/run resolution, the
-tracker and its hysteresis, the VOC→YOLO box maths, and the PMIC parser. No
-hardware, no model loads, so it runs on either machine in about a second.
+Covers the pure logic only — the matrix, the manifest, path/run/dataset
+resolution, the dataset registry and its validation, the tracker and its
+hysteresis, the VOC→YOLO box maths, the split determinism, the run/dataset class
+guard, and the PMIC parser. No hardware, no model loads, ~1s on either machine.
 
 Run order:
 
 ```
-uv run scripts/fetch_dataset.py    # download + extract FOD-A (Pascal VOC)
-uv run scripts/remap_classes.py    # VOC -> YOLO subset + data.yaml
-uv run scripts/smoke_test.py       # stock yolo11n.pt sanity check
-uv run scripts/train.py            # fine-tune on the subset (MPS) -> runs/train_poc
-uv run scripts/migrate_artifacts.py --from runs/train_poc --run poc-v1
-uv run scripts/export.py --run poc-v1   # runtime artifacts + exports.json (Mac only, see v3)
+uv run scripts/prepare_dataset.py --dataset fod-a   # download, convert -> data/fod-a/
+uv run scripts/smoke_test.py                       # stock yolo11n.pt sanity check
+uv run scripts/train.py --dataset fod-a            # fine-tune (MPS) -> runs/train_fod-a
+uv run scripts/migrate_artifacts.py --from runs/train_fod-a --run poc-v1 --dataset fod-a
+uv run scripts/export.py --run poc-v1              # runtime artifacts + exports.json (Mac only)
 ```
 
 `migrate_artifacts.py` publishes a training run: it lifts `best.pt` and any
 already-built exports out of Ultralytics' `runs/` scratch into
-`artifacts/<run-id>/`, and copies the val split in beside them. Everything
-downstream takes `--run <run-id>`, defaulting to `CURRENT_RUN` in
-`src/fodcv/paths.py` — bump that one constant when a new run supersedes the old.
+`artifacts/<run-id>/`, copies the val split in beside them, and writes a
+`run.json` recording which dataset the run came from.
+
+### Adding a dataset
+
+Datasets are declared in `src/fodcv/research/datasets.py`, one entry per id:
+
+```
+uv run scripts/prepare_dataset.py --list              # what is registered, what is built
+uv run scripts/prepare_dataset.py --dataset arena-v1  # build it
+uv run scripts/prepare_dataset.py --dataset fod-a --force   # rebuild an existing one
+```
+
+Two source kinds, because the two datasets that matter have nothing in common:
+
+- **`VocSource`** — a Pascal VOC zip on Google Drive, downloaded and converted.
+  FOD-A: 31 categories collapse to the 4-class PoC scheme via `class_map`.
+- **`YoloSource`** — an export from a labelling tool that is already YOLO.
+  Nothing to download, nothing to convert; it is copied in and validated (every
+  image has a label, every class id used is declared). PRD §10's ~2000–2500
+  arena images arrive this way, so `arena-v1` ships as a commented-out template.
+
+Preparing writes only to `data/<dataset-id>/` and refuses to overwrite an
+existing dataset without `--force`, so a second dataset cannot delete the first.
 
 v2, angle-robustness (see below) -- writes to a separate run dir, doesn't touch v1:
 
@@ -68,11 +94,10 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 
 | Script | What it does |
 |---|---|
-| `fetch_dataset.py` | Downloads/extracts the FOD-A Pascal VOC dataset from Google Drive (idempotent). |
-| `remap_classes.py` | Filters FOD-A's 31 categories down to a fastener subset, remaps to a class scheme (see Findings), writes a YOLO-format subset + `data.yaml`. |
+| `prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
 | `smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
-| `train.py` | Fine-tunes `yolo11n.pt` on the remapped subset (MPS, 15 epochs) — a plumbing check, not a real accuracy result. |
-| `migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`. |
+| `train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/` — a plumbing check, not a real accuracy result. |
+| `migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
 | `export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. |
 | `camera_test.py` | Live webcam smoke test (Ultralytics streaming inference), Mac-only stand-in for the Pi's real camera. |
 | `list_cameras.py` | Lists OpenCV camera indices (useful for picking the right one, e.g. an iPhone via Continuity Camera). |
@@ -92,7 +117,7 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 
 **Reusable:**
 - `ultralytics` YOLO11n + `uv` as the toolchain.
-- `remap_classes.py`'s pattern (parse annotations → normalize boxes → write YOLO labels + `data.yaml`) — reuse once self-collected arena images are labeled.
+- The dataset registry — once the arena images are labelled, they are a `YoloSource` entry in `research/datasets.py`, not new code.
 - `export.py` itself — now the real artifact builder (see v3), not just a toolchain probe. Repoint `--weights` at the arena-trained single-class model and it produces the same matrix.
 - The `uv add`-every-export-dep-upfront gotcha above — it recurs for every new export format (`pnnx`, `nncf`; see v3).
 

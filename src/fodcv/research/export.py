@@ -41,12 +41,12 @@ from fodcv.matrix import (
     takes_calibration,
 )
 from fodcv.paths import (
+    CURRENT_DATASET,
     CURRENT_RUN,
-    DATA_YAML,
-    DATASET_DIR,
     ROOT,
-    VAL_IMAGES,
-    run_dir,
+    calib_yaml_path,
+    dataset_val_images,
+    dataset_yaml,
     run_weights,
 )
 
@@ -97,7 +97,7 @@ def check_quantized(manifest: dict, manifest_path: Path, formats: list[str]):
                   f"-- almost certainly not quantized, do not report its INT8 numbers")
 
 
-def calib_yaml() -> Path:
+def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
     """data.yaml with `val:` repointed at the train images, for INT8 calibration.
 
     Lives beside data.yaml in the dataset directory, not in the run directory:
@@ -109,19 +109,21 @@ def calib_yaml() -> Path:
     shipped to the Pi, and the Pi never quantizes anything.
 
     ponytail: generated, not committed -- data/ is gitignored and a second
-    checked-in yaml would drift from data.yaml the moment remap_classes.py reruns.
+    checked-in yaml would drift from data.yaml the moment the dataset is rebuilt.
     """
-    out = DATASET_DIR / "data-calib.yaml"
-    rewritten, n = re.subn(r"^val:.*$", "val: images/train", DATA_YAML.read_text(), flags=re.M)
+    data_yaml = dataset_yaml(dataset)
+    out = calib_yaml_path(dataset)
+    rewritten, n = re.subn(r"^val:.*$", "val: images/train", data_yaml.read_text(), flags=re.M)
     # An unchecked rewrite is the dangerous failure here: if `val:` ever stops
     # being line-anchored the substitution is a silent no-op, INT8 calibrates on
     # the evaluation split, and the AC-2 INT8 drop comes out flatteringly small.
-    assert n == 1, f"expected exactly one `val:` line in {DATA_YAML}, rewrote {n}"
+    assert n == 1, f"expected exactly one `val:` line in {data_yaml}, rewrote {n}"
     out.write_text(rewritten)
     return out
 
 
-def run(run=CURRENT_RUN, weights=None, formats=None, precisions=None, imgsz=IMGSZ, force=False):
+def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
+        precisions=None, imgsz=IMGSZ, force=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -129,9 +131,12 @@ def run(run=CURRENT_RUN, weights=None, formats=None, precisions=None, imgsz=IMGS
     assert weights.exists(), (
         f"no weights at {weights} -- train.py, then migrate_artifacts.py --run {run}"
     )
-    assert DATA_YAML.exists(), f"no dataset at {DATA_YAML} -- run remap_classes.py first"
+    data_yaml = dataset_yaml(dataset)
+    assert data_yaml.exists(), (
+        f"no dataset at {data_yaml} -- run prepare_dataset.py --dataset {dataset}"
+    )
 
-    calib = calib_yaml()
+    calib = calib_yaml(dataset)
     manifest_path = weights.parent / mf.NAME
     manifest = mf.load(manifest_path)
 
@@ -161,7 +166,7 @@ def run(run=CURRENT_RUN, weights=None, formats=None, precisions=None, imgsz=IMGS
                         )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that can't be loaded back is not an export.
-                    YOLO(path).predict(source=str(next(VAL_IMAGES.glob("*.jpg"))), verbose=False)
+                    YOLO(path).predict(source=str(next(dataset_val_images(dataset).glob("*.jpg"))), verbose=False)
                     manifest[key] = mf.entry_for(path, manifest_path)
                 except Exception as e:
                     manifest[key] = f"{mf.FAILED}: {type(e).__name__}: {e}"

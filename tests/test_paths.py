@@ -22,16 +22,23 @@ def test_resolve_weights_falls_back_to_stock(monkeypatch, tmp_path):
     assert paths.resolve_weights("poc-v9") == paths.STOCK_WEIGHTS
 
 
-def test_trained_weights_takes_the_newest_run(monkeypatch, tmp_path):
-    v1, v2 = tmp_path / "v1" / "best.pt", tmp_path / "v2" / "best.pt"
-    for p in (v1, v2):
-        p.parent.mkdir(parents=True)
-        p.write_bytes(b"model")
-    monkeypatch.setattr(paths, "TRAINING_RUNS", [v2, v1])
-    assert paths.trained_weights() == v2
+def test_dataset_paths_all_hang_off_one_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+    root = tmp_path / "data" / "fod-a"
+    assert paths.dataset_dir("fod-a") == root
+    assert paths.dataset_yaml("fod-a") == root / "data.yaml"
+    assert paths.dataset_val_images("fod-a") == root / "images" / "val"
+    assert paths.calib_yaml_path("fod-a") == root / "data-calib.yaml"
 
 
-def test_trained_weights_is_none_when_nothing_is_trained(monkeypatch, tmp_path):
-    """export refuses on None rather than exporting the stock COCO model."""
-    monkeypatch.setattr(paths, "TRAINING_RUNS", [tmp_path / "nope" / "best.pt"])
-    assert paths.trained_weights() is None
+def test_two_datasets_do_not_share_a_directory(monkeypatch, tmp_path):
+    """The collision that made preparing a second dataset delete the first."""
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+    assert paths.dataset_dir("fod-a") != paths.dataset_dir("arena-v1")
+
+
+def test_calibration_yaml_sits_with_its_dataset(monkeypatch, tmp_path):
+    """Not in the run dir: it repoints val: at images/train, which only resolves
+    where the train images are. Both yamls omit path:, so location decides."""
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+    assert paths.calib_yaml_path("fod-a").parent == paths.dataset_dir("fod-a")

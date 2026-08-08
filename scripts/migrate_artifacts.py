@@ -22,25 +22,42 @@ namespace, so nothing in the manifest points at it) and runs/detect/val*
 """
 
 import argparse
+import json
 import shutil
+from datetime import date
 from pathlib import Path
 
 from fodcv import manifest as mf
-from fodcv.paths import CURRENT_RUN, DATASET_DIR, ROOT, run_dir
+from fodcv.paths import (
+    CURRENT_DATASET,
+    CURRENT_RUN,
+    ROOT,
+    dataset_dir,
+    run_dir,
+    run_metadata,
+)
 from fodcv.research.dataset import write_data_yaml
+from fodcv.research.datasets import class_names
 
 
-def copy_eval_split(dest):
-    """Copy the val split in beside the run, with a location-independent yaml."""
+def copy_eval_split(dest, dataset: str):
+    """Copy the val split in beside the run, with a location-independent yaml.
+
+    Both splits point at images/val: the run ships only its evaluation set, and
+    a `train:` key pointing at absent images would fail Ultralytics' check.
+    """
     for kind in ("images", "labels"):
-        src = DATASET_DIR / kind / "val"
-        assert src.exists(), f"no {src} -- run remap_classes.py first"
+        src = dataset_dir(dataset) / kind / "val"
+        assert src.exists(), (
+            f"no {src} -- run prepare_dataset.py --dataset {dataset}"
+        )
         shutil.copytree(src, dest / kind / "val", dirs_exist_ok=True)
-    write_data_yaml(dest / "data.yaml", train="images/val", val="images/val")
+    write_data_yaml(dest / "data.yaml", class_names(dataset),
+                    train="images/val", val="images/val")
     return len(list((dest / "images" / "val").glob("*.jpg")))
 
 
-def migrate(source_dir, run: str):
+def migrate(source_dir, run: str, dataset: str):
     weights_dir = source_dir / "weights"
     best = weights_dir / "best.pt"
     assert best.exists(), f"no {best}"
@@ -71,8 +88,23 @@ def migrate(source_dir, run: str):
     mf.save(new_manifest_path, rewritten)
     print(f"{mf.NAME} -> {new_manifest_path} ({len(rewritten)} cells, relative paths)")
 
-    n = copy_eval_split(dest / "eval")
+    n = copy_eval_split(dest / "eval", dataset)
     print(f"eval split -> {dest / 'eval'} ({n} images)")
+
+    # Provenance. A benchmark row is not interpretable without the data behind
+    # it, and bench_pi refuses to score a run against a differently-classed
+    # dataset once this exists.
+    metadata = {
+        "run": run,
+        "dataset": dataset,
+        "weights": "best.pt",
+        "classes": {str(cid): name for cid, name in class_names(dataset).items()},
+        "eval_images": n,
+        "source": str(source_dir.relative_to(ROOT)),
+        "created": date.today().isoformat(),
+    }
+    run_metadata(run).write_text(json.dumps(metadata, indent=2) + "\n")
+    print(f"run.json -> {run_metadata(run)}")
 
     unresolved = [k for k in rewritten if not rewritten[k].startswith((mf.FAILED, mf.UNSUPPORTED))
                   and not mf.built(rewritten, new_manifest_path, *k.split(":"))]
@@ -86,10 +118,12 @@ def main():
     parser.add_argument("--from", dest="source", default="runs/train_poc",
                         help="Ultralytics run dir holding weights/ (default: runs/train_poc)")
     parser.add_argument("--run", default=CURRENT_RUN, help=f"run-id to create (default: {CURRENT_RUN})")
+    parser.add_argument("--dataset", default=CURRENT_DATASET,
+                        help=f"dataset this run was trained on (default: {CURRENT_DATASET})")
     args = parser.parse_args()
 
     source = Path(args.source)
-    migrate(source if source.is_absolute() else ROOT / source, args.run)
+    migrate(source if source.is_absolute() else ROOT / source, args.run, args.dataset)
 
 
 if __name__ == "__main__":

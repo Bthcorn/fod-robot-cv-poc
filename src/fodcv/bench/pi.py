@@ -36,6 +36,7 @@ Results -> runs/bench_pi/results.csv (+ conditions.txt, soak.csv)
 """
 
 import csv
+import json
 import os
 import platform
 import re
@@ -60,12 +61,14 @@ from fodcv.matrix import (
     takes_calibration,
 )
 from fodcv.paths import (
+    CURRENT_DATASET,
     CURRENT_RUN,
-    DATA_YAML,
-    DATASET_DIR,
     ROOT,
-    VAL_IMAGES,
+    calib_yaml_path,
+    dataset_val_images,
+    dataset_yaml,
     run_eval_yaml,
+    run_metadata,
     run_weights,
 )
 
@@ -290,9 +293,33 @@ def soak(weights: str, fmt: str, label: str, frames: list, seconds: int, calib):
     print(f"wrote {out} -- {done} frames over {seconds}s")
 
 
-def eval_split(run: str):
+def dataset_of(run: str) -> str | None:
+    """The dataset this run was trained on, from run.json. None if unrecorded."""
+    meta_path = run_metadata(run)
+    return json.loads(meta_path.read_text()).get("dataset") if meta_path.exists() else None
+
+
+def class_names_in(data_yaml: Path) -> dict[int, str]:
+    """The `names:` block, parsed without pulling in a yaml dependency.
+
+    The file is written by write_data_yaml, so the shape is known: two-space
+    indented `<id>: <name>` lines under `names:` and nothing after them.
+    """
+    names, in_names = {}, False
+    for line in data_yaml.read_text().splitlines():
+        if line.startswith("names:"):
+            in_names = True
+        elif in_names and line.startswith("  "):
+            cid, _, name = line.strip().partition(":")
+            names[int(cid)] = name.strip()
+        elif in_names and line.strip():
+            break
+    return names
+
+
+def eval_split(run: str, dataset: str):
     """(data.yaml, val image dir) for scoring: the run's own eval set if it has
-    one, else the full dataset.
+    one, else the named dataset.
 
     On the Pi only the shipped `artifacts/<run>/eval/` exists -- data/ is Mac
     side and gitignored. Pinning the eval set to the run also stops a v2
@@ -301,22 +328,46 @@ def eval_split(run: str):
     shipped = run_eval_yaml(run)
     if shipped.exists():
         return shipped, shipped.parent / "images" / "val"
-    assert DATA_YAML.exists(), (
-        f"no eval set: neither {shipped} nor {DATA_YAML}"
-        f" -- rsync artifacts/{run}/, or run remap_classes.py"
+    fallback = dataset_yaml(dataset)
+    assert fallback.exists(), (
+        f"no eval set: neither {shipped} nor {fallback}"
+        f" -- rsync artifacts/{run}/, or run prepare_dataset.py --dataset {dataset}"
     )
-    return DATA_YAML, VAL_IMAGES
+    return fallback, dataset_val_images(dataset)
 
 
-def run(run=CURRENT_RUN, weights=None, models=None, formats=None, precisions=None,
-        threads=None, run_val=True, soak_seconds=0):
+def check_class_agreement(run: str, data_yaml: Path):
+    """A model scored against a differently-classed dataset reports nonsense.
+
+    A 4-class FOD-A model evaluated on a 1-class arena set does not error -- it
+    quietly reports near-zero mAP, which reads as a bad model rather than a
+    mismatched pairing. run.json records what the run was trained on, so when it
+    is present the two can actually be compared.
+    """
+    meta_path = run_metadata(run)
+    if not meta_path.exists():
+        return  # pre-provenance run; nothing to compare against
+    trained = json.loads(meta_path.read_text()).get("classes")
+    if not trained:
+        return
+    scoring = {str(cid): name for cid, name in class_names_in(data_yaml).items()}
+    assert trained == scoring, (
+        f"class mismatch: run {run!r} was trained on {trained}, "
+        f"but {data_yaml} declares {scoring} -- the mAP would be meaningless"
+    )
+
+
+def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, formats=None,
+        precisions=None, threads=None, run_val=True, soak_seconds=0):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
     if threads:
         apply_threads(threads)
 
-    data_yaml, val_images = eval_split(run)
+    data_yaml, val_images = eval_split(run, dataset)
+    if run_val:
+        check_class_agreement(run, data_yaml)
     image_paths = sorted(val_images.glob("*.jpg"))
     assert image_paths, f"no val images in {val_images}"
     frames = load_images(image_paths, WARMUP + RUNS)
@@ -324,12 +375,13 @@ def run(run=CURRENT_RUN, weights=None, models=None, formats=None, precisions=Non
     models = models or [weights or str(run_weights(run))]
     # Calibration data is Mac-side only; the fallback keeps a Pi-local export
     # from crashing, though such a cell is already the `exported` warning sign.
-    calib = DATASET_DIR / "data-calib.yaml"
+    calib = calib_yaml_path(dataset)
     calib = calib if calib.exists() else data_yaml
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     conditions = board_conditions()
     conditions["weights"] = ", ".join(models)
+    conditions["dataset"] = dataset_of(run) or dataset
     print("board conditions:")
     for k, v in conditions.items():
         print(f"  {k}: {v}")
@@ -344,6 +396,9 @@ def run(run=CURRENT_RUN, weights=None, models=None, formats=None, precisions=Non
             for label in precisions:
                 print(f"\n=== {Path(model_weights).name} {fmt} {label} ===")
                 row = bench_one(model_weights, fmt, label, frames, data_yaml if run_val else None, calib)
+                # Provenance on the row itself: a latency number without the data
+                # behind it is not a result anyone can write up.
+                row["dataset"] = conditions["dataset"]
                 rows.append(row)
                 sources.append(model_weights)
                 if row["status"] == "ok":
@@ -375,7 +430,7 @@ def run(run=CURRENT_RUN, weights=None, models=None, formats=None, precisions=Non
         + f"\nval_images: {len(image_paths)}\nimgsz: {IMGSZ}\nruns: {RUNS} (warmup {WARMUP})\n"
     )
 
-    fields = ["model", "format", "precision", "threads", "artifact", "median_ms", "p95_ms", "fps",
+    fields = ["model", "dataset", "format", "precision", "threads", "artifact", "median_ms", "p95_ms", "fps",
               "preprocess_ms", "inference_ms", "postprocess_ms", "size_mb", "map50", "map50_95",
               "temp_start_c", "temp_end_c", "throttled", "power_w", "status"]
     with (OUT_DIR / "results.csv").open("w", newline="") as f:
