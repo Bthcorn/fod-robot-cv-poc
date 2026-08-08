@@ -2,40 +2,64 @@
 
 Three directories, three jobs:
 
-  data/     the dataset. Big, gitignored, Mac-side, regenerable.
+  data/<dataset-id>/    a prepared dataset: data.yaml, images/, labels/.
+            Big, gitignored, Mac-side, rebuildable from the registry.
   runs/     Ultralytics' own scratch: checkpoints, plots, val dirs. Never read
             by anything but the migration script.
   artifacts/<run-id>/   the deploy unit. Weights, exports, manifest, and the
             eval split the benchmark scores against -- everything the Pi needs
             and nothing it doesn't. One rsync moves it.
 
-A run-id names one trained model everywhere. Before this there were three
-different answers to "which weights": policy.py preferred train_poc_v2 then
-train_poc, export.py hardcoded train_poc with no fallback, camera_test.py had a
-third copy. After a single `train.py --angle-aug` run they pointed at different
-models, so the exporter wrote artifacts beside v1 while the benchmark looked for
-them beside v2, found nothing, and fell back to exporting locally -- which on
-the Pi cannot build LiteRT at all.
+Two ids, same shape. A run-id names one trained model everywhere; a dataset-id
+names one prepared dataset. Both default to a single constant here, so one edit
+moves every command.
+
+The run-id exists because there were once three different answers to "which
+weights": policy.py preferred train_poc_v2 then train_poc, export.py hardcoded
+train_poc with no fallback, camera_test.py had a third copy. The dataset-id
+exists for the mirror-image reason: there was one hardcoded dataset directory,
+and preparing a second one deleted the first.
+
+This module is imported by runtime/, so it must not import from research/ --
+hence the dataset *id* lives here while the registry that describes each dataset
+lives in research/datasets.py.
 """
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-DATASET_DIR = ROOT / "data" / "yolo-subset"
-DATA_YAML = DATASET_DIR / "data.yaml"
-VAL_IMAGES = DATASET_DIR / "images" / "val"
-
+DATA_DIR = ROOT / "data"
 ARTIFACTS_DIR = ROOT / "artifacts"
-# Bump this when a new run supersedes the old one, and every command follows.
+
+# Bump these when a new run or dataset supersedes the old one, and every command
+# follows. Both are overridable per command with --run / --dataset.
 CURRENT_RUN = "poc-v1"
+CURRENT_DATASET = "fod-a"
 
 STOCK_WEIGHTS = "yolo11n.pt"
-# Ultralytics scratch dirs the migration script harvests from, newest first.
-TRAINING_RUNS = [
-    ROOT / "runs" / "train_poc_v2" / "weights" / "best.pt",
-    ROOT / "runs" / "train_poc" / "weights" / "best.pt",
-]
+
+
+def dataset_dir(dataset: str = CURRENT_DATASET) -> Path:
+    return DATA_DIR / dataset
+
+
+def dataset_yaml(dataset: str = CURRENT_DATASET) -> Path:
+    return dataset_dir(dataset) / "data.yaml"
+
+
+def dataset_val_images(dataset: str = CURRENT_DATASET) -> Path:
+    return dataset_dir(dataset) / "images" / "val"
+
+
+def calib_yaml_path(dataset: str = CURRENT_DATASET) -> Path:
+    """INT8 calibration yaml, beside the dataset it calibrates from.
+
+    Not in artifacts/<run>/: it repoints `val:` at the train split, and both
+    yamls omit `path:` so their splits resolve relative to wherever the yaml
+    sits. A copy in the run directory would look for images/train there.
+    """
+    return dataset_dir(dataset) / "data-calib.yaml"
 
 
 def run_dir(run: str = CURRENT_RUN) -> Path:
@@ -51,9 +75,9 @@ def run_eval_yaml(run: str = CURRENT_RUN) -> Path:
     return run_dir(run) / "eval" / "data.yaml"
 
 
-def trained_weights() -> Path | None:
-    """The newest checkpoint under runs/, or None. Only the migration uses this."""
-    return next((p for p in TRAINING_RUNS if p.exists()), None)
+def run_metadata(run: str = CURRENT_RUN) -> Path:
+    """Provenance: which dataset this run was trained on. See migrate_artifacts."""
+    return run_dir(run) / "run.json"
 
 
 def resolve_weights(run: str = CURRENT_RUN) -> str:

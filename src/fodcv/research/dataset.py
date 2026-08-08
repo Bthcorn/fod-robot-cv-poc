@@ -1,17 +1,25 @@
-"""Get FOD-A onto disk, then remap it into the PoC's 4-class YOLO subset.
+"""Turn a registered source into a prepared dataset at `data/<dataset-id>/`.
 
-Two halves of one job -- download-and-extract, then remap-and-split -- so they
-live in one module and share VOC_ROOT instead of importing it across files.
+Two kinds of source, one output shape. Whatever the input, preparing a dataset
+leaves a directory Ultralytics can train and score against directly:
 
-Download: the FOD-A GitHub repo (FOD-UNOmaha/FOD-data) only ships tools/docs,
-not the images -- the actual data lives on Google Drive, linked from its README.
+    data/<dataset-id>/
+      data.yaml          no `path:` key -- see write_data_yaml
+      images/{train,val}
+      labels/{train,val}
 
-Remap: FOD-A's 31 VOC categories collapse to a 4-class scheme. PRD FR-3's
-committed targets (nail, screw, bolt) each get their own class, everything else
-fastener-adjacent (washer, nut, combo types) becomes `unknown`. This is a PoC
-experiment/comparison -- PRD FR-3 specifies training a single
-`metal_fastener` class and recovering per-class recall from the seeding log.
-The result is a subset for the PoC train/eval smoke test, not the real dataset.
+VOC sources (FOD-A) are downloaded and converted: 31 categories collapse to the
+4-class PoC scheme, and only images carrying a mapped box are kept. That is an
+experiment/comparison -- PRD FR-3 specifies training a single `metal_fastener`
+class and recovering per-class recall from the seeding log.
+
+YOLO sources are already labelled by a tool that exports YOLO, so there is
+nothing to download and nothing to convert. They are copied in and validated.
+
+Preparing is scoped to one dataset's own directory and refuses to overwrite an
+existing one without `force`. The previous version opened with an unconditional
+`shutil.rmtree` on the single shared output directory, so preparing a second
+dataset destroyed the first.
 """
 
 import random
@@ -21,56 +29,133 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-from fodcv.paths import ROOT
+from fodcv.paths import CURRENT_DATASET, DATA_DIR, dataset_dir, dataset_yaml
+from fodcv.research.datasets import SOURCES, VocSource, YoloSource, source
 
-DATA_DIR = ROOT / "data"
-ZIP_PATH = DATA_DIR / "fod-a-voc.zip"
-VOC_DRIVE_ID = "1RdErcq8PGRXZUOGauaACkQG44T-QyZ4x"  # FOD-A v2.1 Pascal VOC, 300x300
-EXTRACT_DIR = DATA_DIR / "fod-a-voc"
-VOC_ROOT = EXTRACT_DIR / "FODPascalVOCFormat-V.2.1" / "VOC2007"
-
-CLASS_MAP = {
-    "Nail": ("nail", 0),
-    "Screw": ("screw", 1),
-    "Bolt": ("bolt", 2),
-    "Washer": ("unknown", 3),
-    "Nut": ("unknown", 3),
-    "BoltWasher": ("unknown", 3),
-    "BoltNutSet": ("unknown", 3),
-}
-CLASS_NAMES = {cid: name for name, cid in CLASS_MAP.values()}
-SUBSET_SIZE = 600  # PoC smoke test, not the real ~2000-2500 own-image dataset (PRD §10)
-VAL_FRACTION = 0.15
-OUT_DIR = DATA_DIR / "yolo-subset"
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 
 
-def fetch() -> Path:
-    """Download + extract the FOD-A Pascal VOC mirror (~432MB). Idempotent."""
+# --------------------------------------------------------------------------
+# shared
+# --------------------------------------------------------------------------
+
+
+def write_data_yaml(data_yaml: Path, class_names: dict[int, str],
+                    train: str = "images/train", val: str = "images/val") -> Path:
+    """Write a data.yaml with **no `path:` key**, deliberately.
+
+    Ultralytics resolves the dataset root as
+    `data.get("path") or Path(data["yaml_file"]).parent`, so omitting `path:`
+    makes every split relative to the yaml's own directory -- correct from any
+    working directory and after the tree is copied anywhere.
+
+    Note `path: .` does NOT do this: "." exists, so Ultralytics keeps it and
+    resolves the splits against the *current working directory* instead.
+    """
+    names_block = "\n".join(f"  {cid}: {name}" for cid, name in sorted(class_names.items()))
+    data_yaml.parent.mkdir(parents=True, exist_ok=True)
+    data_yaml.write_text(
+        f"train: {train}\n"
+        f"val: {val}\n"
+        "names:\n"
+        f"{names_block}\n"
+    )
+    return data_yaml
+
+
+def split(items: list, val_fraction: float, seed: int, subset_size: int | None = None) -> dict[str, list]:
+    """Deterministic train/val split: shuffle, trim, then cut.
+
+    Seeded, or two machines score different images. The order matters and must
+    not be rearranged -- trimming after the cut instead of before would move
+    images between train and val, silently changing every mAP already recorded.
+    `random.Random(seed)` reproduces the previous global `random.seed(seed)`.
+    """
+    items = list(items)
+    random.Random(seed).shuffle(items)
+    if subset_size is not None:
+        items = items[:subset_size]
+    n_val = int(len(items) * val_fraction)
+    return {"val": items[:n_val], "train": items[n_val:]}
+
+
+def _claim_output(dataset: str, force: bool) -> Path:
+    """Clear the dataset's own directory, and only ever its own.
+
+    Checked before any download or parsing so a refusal costs nothing. The
+    previous version opened the conversion with an unconditional rmtree of the
+    single shared output directory, so preparing a second dataset destroyed the
+    first without asking.
+    """
+    out = dataset_dir(dataset)
+    if out.exists():
+        assert force, f"{out} already exists -- pass --force to rebuild it"
+        shutil.rmtree(out)
+    return out
+
+
+def available() -> list[dict]:
+    """Every registered dataset and whether it is prepared on disk. For --list."""
+    return [
+        {
+            "dataset": name,
+            "kind": type(src).__name__.removesuffix("Source").lower(),
+            "classes": len(src.class_names),
+            "prepared": dataset_yaml(name).exists(),
+        }
+        for name, src in sorted(SOURCES.items())
+    ]
+
+
+def prepare(dataset: str = CURRENT_DATASET, force: bool = False) -> Path:
+    """Build `data/<dataset>/` from its registered source. Returns the data.yaml."""
+    src = source(dataset)
+    out = _claim_output(dataset, force)  # up front: refusing must cost nothing
+    if isinstance(src, VocSource):
+        return _prepare_voc(dataset, src, out)
+    return _prepare_yolo(dataset, src, out)
+
+
+# --------------------------------------------------------------------------
+# Pascal VOC sources
+# --------------------------------------------------------------------------
+
+
+def fetch_voc(src: VocSource) -> Path:
+    """Download + extract a VOC zip from Google Drive. Idempotent.
+
+    The FOD-A GitHub repo (FOD-UNOmaha/FOD-data) only ships tools/docs, not the
+    images -- the actual data lives on Google Drive, linked from its README.
+    """
     DATA_DIR.mkdir(exist_ok=True)
+    zip_path = DATA_DIR / src.zip_name
+    extract_dir = DATA_DIR / Path(src.zip_name).stem
 
-    if not ZIP_PATH.exists():
-        subprocess.run(["gdown", VOC_DRIVE_ID, "-O", str(ZIP_PATH)], check=True)
+    if not zip_path.exists():
+        subprocess.run(["gdown", src.drive_id, "-O", str(zip_path)], check=True)
     else:
-        print(f"already downloaded: {ZIP_PATH}")
+        print(f"already downloaded: {zip_path}")
 
-    if not VOC_ROOT.exists():
-        with zipfile.ZipFile(ZIP_PATH) as zf:
-            zf.extractall(EXTRACT_DIR)
+    voc_root = extract_dir / src.extract_subdir
+    if not voc_root.exists():
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(extract_dir)
     else:
-        print(f"already extracted: {VOC_ROOT}")
+        print(f"already extracted: {voc_root}")
 
-    n_images = len(list((VOC_ROOT / "JPEGImages").glob("*.jpg")))
-    print(f"VOC root: {VOC_ROOT} ({n_images} images)")
-    return VOC_ROOT
+    n_images = len(list((voc_root / "JPEGImages").glob("*.jpg")))
+    print(f"VOC root: {voc_root} ({n_images} images)")
+    return voc_root
 
 
-def fastener_boxes(xml_path: Path):
+def fastener_boxes(xml_path: Path, class_map: dict[str, tuple[str, int]]):
+    """Mapped boxes from one VOC annotation, in YOLO normalized centre form."""
     root = ET.parse(xml_path).getroot()
     w = float(root.findtext("size/width"))
     h = float(root.findtext("size/height"))
     boxes = []
     for obj in root.findall("object"):
-        mapped = CLASS_MAP.get(obj.findtext("name"))
+        mapped = class_map.get(obj.findtext("name"))
         if mapped is None:
             continue
         _, class_id = mapped
@@ -84,65 +169,105 @@ def fastener_boxes(xml_path: Path):
     return boxes
 
 
-def write_data_yaml(data_yaml: Path, train: str = "images/train", val: str = "images/val") -> Path:
-    """Write a data.yaml with **no `path:` key**, deliberately.
-
-    Ultralytics resolves the dataset root as
-    `data.get("path") or Path(data["yaml_file"]).parent`, so omitting `path:`
-    makes every split relative to the yaml's own directory -- correct from any
-    working directory and after the tree is copied anywhere.
-
-    Note `path: .` does NOT do this: "." exists, so Ultralytics keeps it and
-    resolves the splits against the *current working directory* instead.
-    """
-    names_block = "\n".join(f"  {cid}: {name}" for cid, name in sorted(CLASS_NAMES.items()))
-    data_yaml.write_text(
-        f"train: {train}\n"
-        f"val: {val}\n"
-        "names:\n"
-        f"{names_block}\n"
-    )
-    return data_yaml
-
-
-def remap() -> Path:
-    """VOC -> YOLO subset + data.yaml. Returns the data.yaml path."""
-    ann_dir = VOC_ROOT / "Annotations"
-    img_dir = VOC_ROOT / "JPEGImages"
+def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
+    voc_root = fetch_voc(src)
+    ann_dir, img_dir = voc_root / "Annotations", voc_root / "JPEGImages"
 
     candidates = []
-    class_counts = {cid: 0 for cid in CLASS_NAMES}
+    class_counts = {cid: 0 for cid in src.class_names}
     for xml_path in ann_dir.glob("*.xml"):
-        boxes = fastener_boxes(xml_path)
+        boxes = fastener_boxes(xml_path, src.class_map)
         if boxes:
             candidates.append((xml_path.stem, boxes))
             for class_id, *_ in boxes:
                 class_counts[class_id] += 1
 
-    print(f"images with a fastener box: {len(candidates)}")
-    print(f"box counts by class: {[(CLASS_NAMES[cid], n) for cid, n in sorted(class_counts.items())]}")
-    random.seed(0)
-    random.shuffle(candidates)
-    subset = candidates[:SUBSET_SIZE]
+    print(f"images with a mapped box: {len(candidates)}")
+    print(f"box counts by class: {[(src.class_names[cid], n) for cid, n in sorted(class_counts.items())]}")
 
-    n_val = int(len(subset) * VAL_FRACTION)
-    splits = {"val": subset[:n_val], "train": subset[n_val:]}
-
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
-
-    for split, items in splits.items():
-        (OUT_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
-        (OUT_DIR / "labels" / split).mkdir(parents=True, exist_ok=True)
+    subset = split(candidates, src.val_fraction, src.seed, src.subset_size)
+    for name, items in subset.items():
+        (out / "images" / name).mkdir(parents=True, exist_ok=True)
+        (out / "labels" / name).mkdir(parents=True, exist_ok=True)
         for stem, boxes in items:
-            shutil.copy(img_dir / f"{stem}.jpg", OUT_DIR / "images" / split / f"{stem}.jpg")
-            label_lines = [
-                f"{cid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}" for cid, cx, cy, bw, bh in boxes
-            ]
-            (OUT_DIR / "labels" / split / f"{stem}.txt").write_text("\n".join(label_lines) + "\n")
+            shutil.copy(img_dir / f"{stem}.jpg", out / "images" / name / f"{stem}.jpg")
+            lines = [f"{cid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}" for cid, cx, cy, bw, bh in boxes]
+            (out / "labels" / name / f"{stem}.txt").write_text("\n".join(lines) + "\n")
 
-    data_yaml = write_data_yaml(OUT_DIR / "data.yaml")
-
-    print(f"train: {len(splits['train'])} images, val: {len(splits['val'])} images")
+    data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
+    print(f"train: {len(subset['train'])} images, val: {len(subset['val'])} images")
     print(f"data.yaml: {data_yaml}")
     return data_yaml
+
+
+# --------------------------------------------------------------------------
+# already-YOLO sources
+# --------------------------------------------------------------------------
+
+
+def _label_for(image: Path, root: Path) -> Path:
+    """The YOLO convention: labels/ mirrors images/, same stem, .txt."""
+    relative = image.relative_to(root / "images")
+    return root / "labels" / relative.with_suffix(".txt")
+
+
+def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
+    """Every image has a label, and every class id used is declared.
+
+    A labelling tool exporting a class id the registry does not name produces a
+    model whose outputs silently mean the wrong thing, so this is an assert and
+    not a warning.
+    """
+    assert (root / "images").is_dir(), f"no images/ under {root}"
+    assert (root / "labels").is_dir(), f"no labels/ under {root}"
+
+    images = sorted(p for p in (root / "images").rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
+    assert images, f"no images under {root / 'images'}"
+
+    missing = [p for p in images if not _label_for(p, root).exists()]
+    assert not missing, f"{len(missing)} image(s) with no label file, first: {missing[0]}"
+
+    seen = set()
+    for image in images:
+        for line in _label_for(image, root).read_text().split("\n"):
+            if line.strip():
+                seen.add(int(line.split()[0]))
+    undeclared = sorted(seen - set(class_names))
+    assert not undeclared, f"label files use class ids {undeclared} not in class_names {class_names}"
+    return images
+
+
+def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
+    root = Path(src.source_dir).expanduser()
+    assert root.is_dir(), f"no such directory: {root}"
+    images = validate_yolo_export(root, src.class_names)
+    print(f"{len(images)} labelled images in {root}")
+    if src.val_fraction is None:
+        # The export already carries its own split; take it verbatim.
+        shutil.copytree(root / "images", out / "images")
+        shutil.copytree(root / "labels", out / "labels")
+    else:
+        for name, items in split(images, src.val_fraction, src.seed).items():
+            (out / "images" / name).mkdir(parents=True, exist_ok=True)
+            (out / "labels" / name).mkdir(parents=True, exist_ok=True)
+            for image in items:
+                shutil.copy(image, out / "images" / name / image.name)
+                label = _label_for(image, root)
+                shutil.copy(label, out / "labels" / name / label.name)
+
+    data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
+    print(f"data.yaml: {data_yaml}")
+    return data_yaml
+
+
+def summary(dataset: str = CURRENT_DATASET) -> dict:
+    """Counts for provenance. See migrate_artifacts' run.json."""
+    out = dataset_dir(dataset)
+    return {
+        "dataset": dataset,
+        # str keys: json turns int keys into strings anyway, so be explicit
+        # rather than have run.json disagree with what was written.
+        "classes": {str(cid): name for cid, name in source(dataset).class_names.items()},
+        "train_images": len(list((out / "images" / "train").glob("*"))) if out.exists() else 0,
+        "val_images": len(list((out / "images" / "val").glob("*"))) if out.exists() else 0,
+    }
