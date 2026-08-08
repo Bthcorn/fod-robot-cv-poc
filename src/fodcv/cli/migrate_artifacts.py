@@ -18,7 +18,7 @@ Deliberately left behind: the stray un-claimed best.onnx (outside the bench_
 namespace, so nothing in the manifest points at it) and runs/detect/val*
 (13 orphan Ultralytics dirs no code reads). runs/ itself is untouched.
 
-    uv run scripts/migrate_artifacts.py --from runs/train_poc --run poc-v1
+    uv run fodcv-migrate --from runs/train_poc --run poc-v1
 """
 
 import argparse

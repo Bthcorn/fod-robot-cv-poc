@@ -19,7 +19,7 @@ Also settles two open questions:
     the columns to watch -- NMS cost scales with detection count, so removing it
     should tighten p95 more than it moves the median.
 
-Export happens on the Mac (scripts/export.py), not here: litert-converter has no
+Export happens on the Mac (fodcv-export), not here: litert-converter has no
 aarch64 wheel, so the Pi cannot build a .tflite at all. This script reads
 exports.json from artifacts/<run-id>/ and reuses those artifacts; it only falls
 back to exporting locally when one is missing. The `artifact` column is the
@@ -28,10 +28,10 @@ rsync missed and this cell is measuring a different file.
 
 Deploy, then run on the Pi 5:
     rsync -a mac:cv-poc/artifacts/poc-v1/ artifacts/poc-v1/
-    uv run scripts/bench_pi.py --threads 4                  # stage A, full matrix
-    uv run scripts/bench_pi.py --models yolo26n.pt --precisions fp32   # stage B
-    taskset -c 0-1 uv run scripts/bench_pi.py --formats ncnn --threads 2 --no-val
-    uv run scripts/bench_pi.py --formats ncnn --precisions int8 --soak 600
+    uv run fodcv-bench --threads 4                  # stage A, full matrix
+    uv run fodcv-bench --models yolo26n.pt --precisions fp32   # stage B
+    taskset -c 0-1 uv run fodcv-bench --formats ncnn --threads 2 --no-val
+    uv run fodcv-bench --formats ncnn --precisions int8 --soak 600
 Results -> runs/bench_pi/results.csv (+ conditions.txt, soak.csv)
 """
 
@@ -87,7 +87,7 @@ def apply_threads(n: int):
     threading a config object through five backends. It still does not reach the
     LiteRT interpreter (num_threads is a constructor arg Ultralytics doesn't
     expose), so for a fair cross-backend sweep pin cores too:
-        taskset -c 0-{n-1} uv run scripts/bench_pi.py --threads {n}
+        taskset -c 0-{n-1} uv run fodcv-bench --threads {n}
     """
     if os.environ.get("OMP_NUM_THREADS") != str(n):
         env = {**os.environ, "OMP_NUM_THREADS": str(n), "OPENBLAS_NUM_THREADS": str(n)}

@@ -5,8 +5,8 @@ FOD-A needs download-then-convert; an already-labelled YOLO export needs
 neither, so `fetch` would have been a command that exists to do nothing. The
 registry entry decides what preparing means.
 
-    uv run scripts/prepare_dataset.py --list
-    uv run scripts/prepare_dataset.py --dataset fod-a
+    uv run fodcv-prepare --list
+    uv run fodcv-prepare --dataset fod-a
 """
 
 import argparse

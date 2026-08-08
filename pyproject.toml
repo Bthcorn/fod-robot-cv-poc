@@ -34,6 +34,20 @@ bench = [
     "openvino>=2025.0.0",
 ]
 
+[project.scripts]
+# Pipeline order, Mac side.
+fodcv-prepare = "fodcv.cli.prepare_dataset:main"
+fodcv-smoke = "fodcv.cli.smoke_test:main"
+fodcv-train = "fodcv.cli.train:main"
+fodcv-migrate = "fodcv.cli.migrate_artifacts:main"
+fodcv-export = "fodcv.cli.export:main"
+# Pi side.
+fodcv-bench = "fodcv.cli.bench_pi:main"
+# Demos and camera helpers.
+fodcv-policy = "fodcv.cli.confidence_policy:main"
+fodcv-camera = "fodcv.cli.camera_test:main"
+fodcv-list-cameras = "fodcv.cli.list_cameras:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

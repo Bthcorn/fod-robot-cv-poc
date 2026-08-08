@@ -7,7 +7,8 @@ De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot P
 ```
 src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only,
                     bench/ measures, the top level is shared.
-scripts/            thin argparse wrappers -- the CLI, one file per command.
+src/fodcv/cli/      one module per command, argparse only. Wired to console
+                    scripts in pyproject.toml -- see Commands below.
 tests/
 data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
@@ -42,14 +43,14 @@ guard, and the PMIC parser. No hardware, no model loads, ~1s on either machine.
 Run order:
 
 ```
-uv run scripts/prepare_dataset.py --dataset fod-a   # download, convert -> data/fod-a/
-uv run scripts/smoke_test.py                       # stock yolo11n.pt sanity check
-uv run scripts/train.py --dataset fod-a            # fine-tune (MPS) -> runs/train_fod-a
-uv run scripts/migrate_artifacts.py --from runs/train_fod-a --run poc-v1 --dataset fod-a
-uv run scripts/export.py --run poc-v1              # runtime artifacts + exports.json (Mac only)
+uv run fodcv-prepare --dataset fod-a    # download, convert -> data/fod-a/
+uv run fodcv-smoke                      # stock yolo11n.pt sanity check
+uv run fodcv-train --dataset fod-a      # fine-tune (MPS) -> runs/train_fod-a
+uv run fodcv-migrate --from runs/train_fod-a --run poc-v1 --dataset fod-a
+uv run fodcv-export --run poc-v1        # runtime artifacts + exports.json (Mac only)
 ```
 
-`migrate_artifacts.py` publishes a training run: it lifts `best.pt` and any
+`fodcv-migrate` publishes a training run: it lifts `best.pt` and any
 already-built exports out of Ultralytics' `runs/` scratch into
 `artifacts/<run-id>/`, copies the val split in beside them, and writes a
 `run.json` recording which dataset the run came from.
@@ -59,9 +60,9 @@ already-built exports out of Ultralytics' `runs/` scratch into
 Datasets are declared in `src/fodcv/research/datasets.py`, one entry per id:
 
 ```
-uv run scripts/prepare_dataset.py --list              # what is registered, what is built
-uv run scripts/prepare_dataset.py --dataset arena-v1  # build it
-uv run scripts/prepare_dataset.py --dataset fod-a --force   # rebuild an existing one
+uv run fodcv-prepare --list                   # what is registered, what is built
+uv run fodcv-prepare --dataset arena-v1       # build it
+uv run fodcv-prepare --dataset fod-a --force  # rebuild an existing one
 ```
 
 Two source kinds, because the two datasets that matter have nothing in common:
@@ -79,30 +80,33 @@ existing dataset without `--force`, so a second dataset cannot delete the first.
 v2, angle-robustness (see below) -- writes to a separate run dir, doesn't touch v1:
 
 ```
-uv run scripts/train.py --angle-aug        # fine-tune with viewpoint-robustness augmentation
-uv run scripts/confidence_policy.py [src]  # hysteresis + temporal confidence smoothing demo
+uv run fodcv-train --angle-aug  # fine-tune with viewpoint-robustness augmentation
+uv run fodcv-policy [src]       # hysteresis + temporal confidence smoothing demo
 ```
 
 Standalone (Mac camera, not part of the pipeline):
 
 ```
-uv run scripts/list_cameras.py     # list available camera indices
-uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to stop
+uv run fodcv-list-cameras  # list available camera indices
+uv run fodcv-camera [i]    # live webcam + inference, ctrl-C or 'q' to stop
 ```
 
-## Scripts
+## Commands
 
-| Script | What it does |
-|---|---|
-| `prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
-| `smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
-| `train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/` — a plumbing check, not a real accuracy result. |
-| `migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
-| `export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. |
-| `camera_test.py` | Live webcam smoke test (Ultralytics streaming inference), Mac-only stand-in for the Pi's real camera. |
-| `list_cameras.py` | Lists OpenCV camera indices (useful for picking the right one, e.g. an iPhone via Continuity Camera). |
-| `confidence_policy.py` | v2: confidence hysteresis + multi-frame EMA smoothing demo, prototyping the gazing-angle mitigation below. |
-| `bench_pi.py` | v3: runtime/precision benchmark, run **on the Pi 5**. Median + p95 latency, FPS, size and mAP per `{model} × {format} × {fp32,int8}`, plus the board conditions published benchmarks omit. |
+Every command is a console script installed by `uv sync`. Names map one-to-one
+onto `src/fodcv/cli/`, declared in `pyproject.toml` under `[project.scripts]`.
+
+| Command | Module | What it does |
+|---|---|---|
+| `fodcv-prepare` | `cli/prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
+| `fodcv-smoke` | `cli/smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
+| `fodcv-train` | `cli/train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/` — a plumbing check, not a real accuracy result. |
+| `fodcv-migrate` | `cli/migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
+| `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. |
+| `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test (Ultralytics streaming inference), Mac-only stand-in for the Pi's real camera. |
+| `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices (useful for picking the right one, e.g. an iPhone via Continuity Camera). |
+| `fodcv-policy` | `cli/confidence_policy.py` | v2: confidence hysteresis + multi-frame EMA smoothing demo, prototyping the gazing-angle mitigation below. |
+| `fodcv-bench` | `cli/bench_pi.py` | v3: runtime/precision benchmark, run **on the Pi 5**. Median + p95 latency, FPS, size and mAP per `{model} × {format} × {fp32,int8}`, plus the board conditions published benchmarks omit. |
 
 ## Findings
 
@@ -137,7 +141,7 @@ Live testing with v1's weights showed detection confidence dropping as the camer
 - `train.py --angle-aug` — adds Ultralytics' native `degrees`/`shear`/`perspective`/`scale` augmentation (0/default in v1) to push the model toward viewpoint robustness. Writes to `runs/train_<dataset>_aug`, v1's `runs/train_<dataset>` untouched.
 - `confidence_policy.py` — new prototype: two-tier hysteresis (`CAUTION_THRESH=0.25`, `CONFIRM_THRESH=0.5`) instead of one hard cutoff, plus a simple greedy centroid tracker with an EMA of confidence per tracked detection across frames. Since the robot closes distance on approach, angle/range improve frame-to-frame — acting on the EMA rather than a single frame's score avoids dropping a real detection just because one frame's angle was unfavorable.
 
-**v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run scripts/train.py --dataset fod-a --angle-aug` and comparing against the existing `runs/train_poc` metrics (the v1 run predates the `train_<dataset>` naming).
+**v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run fodcv-train --dataset fod-a --angle-aug` and comparing against the existing `runs/train_poc` metrics (the v1 run predates the `train_<dataset>` naming).
 
 **Camera angle research (for PRD O-3, mount height `h` / tilt `θ` in §9, currently placeholder "low ~15-30 cm"):**
 - Ground-plane obstacle-detection literature: pitch should stay near 0 deg when camera height is low, growing only as height grows — a low camera pointed too steeply loses forward look-ahead distance. Near-ground stereo rigs are typically kept within 0-10 deg down from horizontal.
@@ -154,7 +158,7 @@ Live testing with v1's weights showed detection confidence dropping as the camer
 
 ## v3 — on-device benchmark (the Pi 5 is now in hand)
 
-Runtime benchmarking is no longer blocked. Run `uv run scripts/bench_pi.py --run poc-v1` **on the Pi 5**; results land in `runs/bench_pi/`.
+Runtime benchmarking is no longer blocked. Run `uv run fodcv-bench --run poc-v1` **on the Pi 5**; results land in `runs/bench_pi/`.
 
 Why measure rather than cite: the published Pi 5 record contradicts itself.
 
@@ -177,7 +181,7 @@ Not a convenience — a constraint. `litert-converter` ships **no aarch64 Linux 
 So `export.py` builds every artifact here and writes `artifacts/<run-id>/exports.json`; `bench_pi.py` reads that manifest and reuses the artifacts, exporting locally only when one is missing. Each row's `artifact` column records `reused` vs `exported` — an `exported` on a LiteRT row on the Pi means the rsync missed and the number is wrong.
 
 ```
-uv run scripts/export.py --run poc-v1                  # Mac
+uv run fodcv-export --run poc-v1                  # Mac
 rsync -a artifacts/poc-v1/ pi:cv-poc/artifacts/poc-v1/
 ```
 
@@ -187,10 +191,10 @@ Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/
 
 | Stage | Command | Answers |
 |---|---|---|
-| A | `uv run scripts/bench_pi.py --run poc-v1 --threads 4` | M-5 / AC-3 ranking, AC-2 INT8 drop. Headline: LiteRT INT8 (real XNNPACK kernels) vs OpenVINO INT8 (Arm float simulation) |
-| B | `uv run scripts/bench_pi.py --run poc-v1 --models yolo26n.pt --precisions fp32` | YOLO26n's NMS-free head — watch `postprocess_ms` and p95. Stock COCO weights, so **latency only**, ignore its mAP |
-| C | `taskset -c 0-{n-1} uv run scripts/bench_pi.py --run poc-v1 --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
-| D | `uv run scripts/bench_pi.py --run poc-v1 --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
+| A | `uv run fodcv-bench --run poc-v1 --threads 4` | M-5 / AC-3 ranking, AC-2 INT8 drop. Headline: LiteRT INT8 (real XNNPACK kernels) vs OpenVINO INT8 (Arm float simulation) |
+| B | `uv run fodcv-bench --run poc-v1 --models yolo26n.pt --precisions fp32` | YOLO26n's NMS-free head — watch `postprocess_ms` and p95. Stock COCO weights, so **latency only**, ignore its mAP |
+| C | `taskset -c 0-{n-1} uv run fodcv-bench --run poc-v1 --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
+| D | `uv run fodcv-bench --run poc-v1 --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
 
 Active Cooler on for all stages. Stage C needs `taskset` as well as `--threads` because `OMP_NUM_THREADS` reaches ONNX/OpenVINO/NCNN but not the LiteRT interpreter — pinning cores constrains all five backends identically.
 

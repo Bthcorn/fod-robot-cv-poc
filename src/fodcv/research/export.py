@@ -18,7 +18,7 @@ tracks the library instead of a hand-kept list. Note NCNN is absent from
 INT8_FORMATS as of 8.4.115 -- FP16 is its only quantized path, despite PRD FR-1
 listing "NCNN INT8" as one of the three runtimes to benchmark.
 
-Run:  uv run scripts/export.py --run poc-v1
+Run:  uv run fodcv-export --run poc-v1
 Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 
