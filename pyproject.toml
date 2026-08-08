@@ -8,10 +8,15 @@ dependencies = [
     "ai-edge-litert>=2.1.2",
     "coremltools>=9.0",
     "litert-torch>=0.8.0",
+    "mnn>=3.0.0",
+    "ncnn>=1.0.20240410",
+    "nncf>=2.14.0",
     "onnx>=1.22.0",
     "onnxruntime>=1.28.0",
     "onnxslim>=0.1.95",
     "opencv-python>=5.0.0.93",
+    "openvino>=2025.0.0",
+    "pnnx>=20260526",
     "ultralytics>=8.4.115",
 ]
 

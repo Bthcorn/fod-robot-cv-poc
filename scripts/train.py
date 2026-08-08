@@ -2,28 +2,51 @@
 machine (MPS). Short run on the PoC subset -- a plumbing check, not a real
 accuracy result (real training happens later per PRD S10/S14a on the full
 self-collected dataset).
+
+v2 (--angle-aug): adds viewpoint-robustness augmentation (perspective/shear/
+degrees/scale) to counter the gazing-angle confidence drop seen in live
+testing -- PRD S6a mounts the camera low/forward-tilted (grazing angle by
+design), and FOD-A's own viewpoint mix doesn't match that geometry. Writes to
+a separate run dir so v1's results stay untouched for comparison.
 """
 
+import argparse
 from pathlib import Path
 
 from ultralytics import YOLO
 
 DATA_YAML = Path(__file__).resolve().parent.parent / "data" / "yolo-subset" / "data.yaml"
 
+# v2 angle-robustness knobs -- 0/default in v1.
+ANGLE_AUG_HYP = dict(degrees=15, shear=8, perspective=0.0008, scale=0.6)
+
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--angle-aug",
+        action="store_true",
+        help="v2: add viewpoint-robustness augmentation, write to runs/train_poc_v2",
+    )
+    args = parser.parse_args()
+
     assert DATA_YAML.exists(), "run remap_classes.py first"
 
-    model = YOLO("yolo11n.pt")
-    results = model.train(
+    run_name = "train_poc_v2" if args.angle_aug else "train_poc"
+    train_kwargs = dict(
         data=str(DATA_YAML),
         imgsz=640,
         epochs=15,
         device="mps",
         project=str(Path(__file__).resolve().parent.parent / "runs"),
-        name="train_poc",
+        name=run_name,
         exist_ok=True,
     )
+    if args.angle_aug:
+        train_kwargs.update(ANGLE_AUG_HYP)
+
+    model = YOLO("yolo11n.pt")
+    results = model.train(**train_kwargs)
     print(f"training done. results dir: {results.save_dir}")
 
     metrics = model.val()
