@@ -3,7 +3,7 @@
 import argparse
 
 from fodcv.bench import pi
-from fodcv.bench.pi import DEFAULT_PRECISIONS, FORMATS, PRECISIONS
+from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, PRECISIONS
 
 
 def main():

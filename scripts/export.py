@@ -2,13 +2,14 @@
 
 import argparse
 
+from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
+from fodcv.paths import trained_weights
 from fodcv.research import export
-from fodcv.research.export import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", default=None, help=f"default: {export.default_weights()}")
+    parser.add_argument("--weights", default=None, help=f"default: {trained_weights()}")
     parser.add_argument("--formats", nargs="+", default=FORMATS)
     parser.add_argument("--precisions", nargs="+", default=DEFAULT_PRECISIONS, choices=list(PRECISIONS))
     parser.add_argument("--imgsz", type=int, default=IMGSZ)

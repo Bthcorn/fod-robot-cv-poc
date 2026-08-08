@@ -33,7 +33,6 @@ Results -> runs/bench_pi/results.csv (+ conditions.txt, soak.csv)
 """
 
 import csv
-import json
 import os
 import platform
 import re
@@ -45,21 +44,21 @@ from pathlib import Path
 
 import cv2
 from ultralytics import YOLO
-from ultralytics.engine.exporter import FP16_FORMATS, INT8_FORMATS, export_formats
 
-from fodcv.paths import ROOT
-from fodcv.runtime.policy import resolve_weights
+from fodcv import manifest as mf
+from fodcv.matrix import (
+    DEFAULT_PRECISIONS,
+    FORMATS,
+    IMGSZ,
+    PRECISIONS,
+    size_bytes,
+    supported,
+    takes_calibration,
+)
+from fodcv.paths import DATA_YAML, ROOT, VAL_IMAGES, resolve_weights
 
-_FMT_ARGS = dict(zip(export_formats()["Argument"], export_formats()["Arguments"]))
-
-DATA_YAML = ROOT / "data" / "yolo-subset" / "data.yaml"
-VAL_IMAGES = ROOT / "data" / "yolo-subset" / "images" / "val"
 OUT_DIR = ROOT / "runs" / "bench_pi"
 
-FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn"]
-PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
-DEFAULT_PRECISIONS = ["fp32", "int8"]  # keep in step with export.py, or cells have no artifact to reuse
-IMGSZ = 640
 WARMUP = 5
 RUNS = 50
 SOAK_SAMPLE_S = 5
@@ -169,14 +168,6 @@ def time_inference(model: YOLO, frames: list) -> dict:
     return row
 
 
-def supported(fmt: str, quantize) -> bool:
-    if quantize == 8:
-        return fmt in INT8_FORMATS
-    if quantize == 16:
-        return fmt in FP16_FORMATS
-    return True
-
-
 def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | None):
     """Prefer the Mac-built artifact from exports.json; export here only if absent.
 
@@ -184,11 +175,10 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
     those vary per format and precision (best_int8.onnx, best_int8_openvino_model/,
     best_ncnn_model/), and guessing them wrong silently benchmarks the wrong file.
     """
-    manifest_path = Path(weights).parent / "exports.json"
-    if manifest_path.exists():
-        entry = json.loads(manifest_path.read_text()).get(f"{fmt}:{label}", "")
-        if entry and not entry.startswith(("FAILED", "UNSUPPORTED")) and Path(entry).exists():
-            return entry, "reused"
+    manifest_path = Path(weights).parent / mf.NAME
+    built = mf.built(mf.load(manifest_path), fmt, label)
+    if built:
+        return str(built), "reused"
 
     # Fallback only. On the Pi this cannot work for litert at all (no aarch64
     # converter), and every other format is better built once on the Mac -- the
@@ -197,16 +187,9 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
         format=fmt,
         imgsz=IMGSZ,
         quantize=quantize,
-        data=str(calib) if quantize == 8 and "data" in _FMT_ARGS[fmt] else None,
+        data=str(calib) if takes_calibration(fmt, quantize) else None,
     )
     return exported, "exported"
-
-
-def artifact_size_mb(path: str) -> float:
-    p = Path(path)
-    if p.is_dir():
-        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / 1e6
-    return p.stat().st_size / 1e6
 
 
 def bench_one(weights: str, fmt: str, label: str, frames: list, run_val: bool, calib) -> dict:
@@ -229,7 +212,7 @@ def bench_one(weights: str, fmt: str, label: str, frames: list, run_val: bool, c
         model = YOLO(path)
         row.update(time_inference(model, frames))
         row["fps"] = 1000 / row["median_ms"]
-        row["size_mb"] = artifact_size_mb(path)
+        row["size_mb"] = size_bytes(path) / 1e6
         if run_val:
             metrics = model.val(data=str(DATA_YAML), imgsz=IMGSZ, verbose=False)
             row["map50_95"] = metrics.box.map

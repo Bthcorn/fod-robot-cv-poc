@@ -22,7 +22,6 @@ Run:  uv run scripts/export.py
 Out:  runs/train_poc/weights/* + exports.json (the manifest bench_pi.py reads)
 """
 
-import json
 import re
 import shutil
 import subprocess
@@ -30,39 +29,19 @@ from pathlib import Path
 
 import ultralytics
 from ultralytics import YOLO
-from ultralytics.engine.exporter import FP16_FORMATS, INT8_FORMATS, export_formats
 
-from fodcv.paths import ROOT
-
-# Which formats accept a calibration `data=` argument at all. MNN is in
-# INT8_FORMATS but quantizes without calibration data and hard-errors if you
-# pass one, so INT8 support and calibration support are not the same question.
-_FMT_ARGS = dict(zip(export_formats()["Argument"], export_formats()["Arguments"]))
-_FMT_SUFFIX = dict(zip(export_formats()["Argument"], export_formats()["Suffix"]))
-
-DATA_YAML = ROOT / "data" / "yolo-subset" / "data.yaml"
-VAL_IMAGES = ROOT / "data" / "yolo-subset" / "images" / "val"
-
-FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn"]
-PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
-# fp16 is off by default: Ultralytics only encodes INT8 in output filenames, and
-# an FP16 ONNX export is a silent no-op on a CPU device anyway. It stays
-# selectable for NCNN, where FP16 is the only quantized path there is.
-DEFAULT_PRECISIONS = ["fp32", "int8"]
-IMGSZ = 640
-MANIFEST_NAME = "exports.json"
-
-
-def default_weights() -> Path:
-    return ROOT / "runs" / "train_poc" / "weights" / "best.pt"
-
-
-def supported(fmt: str, quantize) -> bool:
-    if quantize == 8:
-        return fmt in INT8_FORMATS
-    if quantize == 16:
-        return fmt in FP16_FORMATS
-    return True
+from fodcv import manifest as mf
+from fodcv.matrix import (
+    DEFAULT_PRECISIONS,
+    FMT_SUFFIX,
+    FORMATS,
+    IMGSZ,
+    PRECISIONS,
+    size_bytes,
+    supported,
+    takes_calibration,
+)
+from fodcv.paths import DATA_YAML, ROOT, VAL_IMAGES, trained_weights
 
 
 def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
@@ -112,16 +91,11 @@ def claim_artifact(path: str, fmt: str, label: str) -> str:
     p = Path(path)
     # Keep Ultralytics' official suffix -- AutoBackend detects the format by
     # substring, so dropping `_ncnn_model` / `_openvino_model` would break loading.
-    claimed = p.with_name(f"bench_{label}{_FMT_SUFFIX[fmt]}")
+    claimed = p.with_name(f"bench_{label}{FMT_SUFFIX[fmt]}")
     if claimed.exists():
         shutil.rmtree(claimed) if claimed.is_dir() else claimed.unlink()
     p.rename(claimed)
     return str(claimed)
-
-
-def size_bytes(path: str) -> int:
-    p = Path(path)
-    return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) if p.is_dir() else p.stat().st_size
 
 
 def check_quantized(manifest: dict, formats: list[str]):
@@ -132,8 +106,8 @@ def check_quantized(manifest: dict, formats: list[str]):
     wrong INT8 column. Size is the format-agnostic tell, so check it every run.
     """
     for fmt in formats:
-        paths = {p: manifest.get(f"{fmt}:{p}", "") for p in ("fp32", "int8")}
-        if not all(v and not v.startswith(("FAILED", "UNSUPPORTED")) and Path(v).exists() for v in paths.values()):
+        paths = {p: mf.built(manifest, fmt, p) for p in ("fp32", "int8")}
+        if not all(paths.values()):
             continue
         fp32, int8 = size_bytes(paths["fp32"]), size_bytes(paths["int8"])
         if int8 > 0.9 * fp32:
@@ -156,26 +130,26 @@ def run(weights=None, formats=None, precisions=None, imgsz=IMGSZ, force=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
-    weights = Path(weights) if weights else default_weights()
-    assert weights.exists(), f"no weights at {weights} -- run train.py first"
+    weights = Path(weights) if weights else trained_weights()
+    assert weights and weights.exists(), f"no fine-tuned weights ({weights}) -- run train.py first"
     assert DATA_YAML.exists(), f"no dataset at {DATA_YAML} -- run remap_classes.py first"
 
     calib = calib_yaml(weights.parent)
-    manifest_path = weights.parent / MANIFEST_NAME
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest_path = weights.parent / mf.NAME
+    manifest = mf.load(manifest_path)
 
     for fmt in formats:
         for label in precisions:
             quantize = PRECISIONS[label]
-            key = f"{fmt}:{label}"
-            done = manifest.get(key, "")
-            if not force and done and not done.startswith("FAILED") and Path(done).exists():
+            key = mf.key(fmt, label)
+            done = mf.built(manifest, fmt, label)
+            if done and not force:
                 # Idempotent: a 30-minute matrix that dies partway should resume,
                 # not rebuild. --force to re-export anyway.
                 print(f"{key}: already built -> {done}")
             elif not supported(fmt, quantize):
                 print(f"{key}: skipped -- Ultralytics does not support {label} for {fmt}")
-                manifest[key] = f"UNSUPPORTED: {fmt} has no {label} export path"
+                manifest[key] = f"{mf.UNSUPPORTED}: {fmt} has no {label} export path"
             else:
                 print(f"\n=== exporting {key} ===")
                 try:
@@ -186,18 +160,16 @@ def run(weights=None, formats=None, precisions=None, imgsz=IMGSZ, force=False):
                             format=fmt,
                             imgsz=imgsz,
                             quantize=quantize,
-                            data=str(calib) if quantize == 8 and "data" in _FMT_ARGS[fmt] else None,
+                            data=str(calib) if takes_calibration(fmt, quantize) else None,
                         )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that can't be loaded back is not an export.
                     YOLO(path).predict(source=str(next(VAL_IMAGES.glob("*.jpg"))), verbose=False)
                     manifest[key] = str(Path(path).resolve())
                 except Exception as e:
-                    manifest[key] = f"FAILED: {type(e).__name__}: {e}"
+                    manifest[key] = f"{mf.FAILED}: {type(e).__name__}: {e}"
 
-            # Written per cell, not at the end: a 30-minute export run that dies on
-            # the last format must not lose the artifacts it already built.
-            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            mf.save(manifest_path, manifest)
 
     print(f"\nwrote {manifest_path}")
     for key in sorted(manifest):

@@ -5,16 +5,14 @@ on the Pi uses picamera2 with locked exposure/AWB (PRD S6a/S10), not this.
 """
 
 import sys
-from pathlib import Path
 
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parent.parent
-TRAINED_WEIGHTS = ROOT / "runs" / "train_poc" / "weights" / "best.pt"
+from fodcv.paths import resolve_weights
 
 
 def main():
-    weights = TRAINED_WEIGHTS if TRAINED_WEIGHTS.exists() else "yolo11n.pt"
+    weights = resolve_weights()
     print(f"using weights: {weights}")
 
     camera_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0

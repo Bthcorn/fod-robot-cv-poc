@@ -23,25 +23,13 @@ import math
 import cv2
 from ultralytics import YOLO
 
-from fodcv.paths import ROOT
-
-CANDIDATE_WEIGHTS = [
-    ROOT / "runs" / "train_poc_v2" / "weights" / "best.pt",
-    ROOT / "runs" / "train_poc" / "weights" / "best.pt",
-]
+from fodcv.paths import resolve_weights
 
 CONFIRM_THRESH = 0.5
 CAUTION_THRESH = 0.25
 EMA_ALPHA = 0.4  # weight on the newest frame
 MAX_MATCH_DIST = 80  # px, greedy nearest-centroid match radius
 MAX_MISSES = 5  # frames a track can go unseen before it's dropped
-
-
-def resolve_weights() -> str:
-    for path in CANDIDATE_WEIGHTS:
-        if path.exists():
-            return str(path)
-    return "yolo11n.pt"
 
 
 class Track:
