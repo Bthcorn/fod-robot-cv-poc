@@ -134,10 +134,10 @@ uv run scripts/camera_test.py [i]  # live webcam + inference, ctrl-C or 'q' to s
 Live testing with v1's weights showed detection confidence dropping as the camera's viewing ("gazing") angle to a fastener changes. Not a bug in the toolchain: PRD §9 mounts the camera **low and forward-tilted, not top-down** — a grazing view by deliberate design (more pixels-on-target at range, at the cost of perspective distortion). At that geometry, small/thin fasteners foreshorten and their specular response to light shifts with angle, both of which erode confidence — and FOD-A's own image set was shot at its own uncontrolled mix of viewpoints, not this robot's fixed geometry, so v1 never specifically learned the deployment angle. Domain gap, not a model limitation.
 
 **What changed:**
-- `train.py --angle-aug` — adds Ultralytics' native `degrees`/`shear`/`perspective`/`scale` augmentation (0/default in v1) to push the model toward viewpoint robustness. Writes to `runs/train_poc_v2`, v1's `runs/train_poc` untouched.
+- `train.py --angle-aug` — adds Ultralytics' native `degrees`/`shear`/`perspective`/`scale` augmentation (0/default in v1) to push the model toward viewpoint robustness. Writes to `runs/train_<dataset>_aug`, v1's `runs/train_<dataset>` untouched.
 - `confidence_policy.py` — new prototype: two-tier hysteresis (`CAUTION_THRESH=0.25`, `CONFIRM_THRESH=0.5`) instead of one hard cutoff, plus a simple greedy centroid tracker with an EMA of confidence per tracked detection across frames. Since the robot closes distance on approach, angle/range improve frame-to-frame — acting on the EMA rather than a single frame's score avoids dropping a real detection just because one frame's angle was unfavorable.
 
-**v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run scripts/train.py --angle-aug` and comparing against the existing `runs/train_poc` metrics.
+**v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run scripts/train.py --dataset fod-a --angle-aug` and comparing against the existing `runs/train_poc` metrics (the v1 run predates the `train_<dataset>` naming).
 
 **Camera angle research (for PRD O-3, mount height `h` / tilt `θ` in §9, currently placeholder "low ~15-30 cm"):**
 - Ground-plane obstacle-detection literature: pitch should stay near 0 deg when camera height is low, growing only as height grows — a low camera pointed too steeply loses forward look-ahead distance. Near-ground stereo rigs are typically kept within 0-10 deg down from horizontal.
@@ -254,7 +254,7 @@ The IMX500 is the only option that would change the architecture rather than jus
 
 ## Out of scope
 
-- Real dataset collection and hardware integration — still need the arena per PRD §10/§14a.
+- Real dataset collection and hardware integration — still need the arena per PRD §10.
 - **imgsz sweep.** PRD v2 states `imgsz=640` and "recall collapses at 320" twice, with no measurement behind it — it is not in §16's list of open measurements either. The benchmark holds 640 fixed, so that claim stays untested. Given App. B.2 makes `v_fast` inversely proportional to pipeline latency, a 320/480 Pareto point is worth a later sweep.
 - Benchmarking any accelerator — none are on hand or budgeted.
 - End-to-end capture→serial latency (M-3): needs `picamera2` + the ESP32 in the loop. This benchmark supplies the *inference* term of that budget, not the total.
