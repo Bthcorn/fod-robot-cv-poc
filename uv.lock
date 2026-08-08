@@ -352,47 +352,56 @@ wheels = [
 [[package]]
 name = "cv-poc"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "opencv-python" },
+    { name = "ultralytics" },
+]
+
+[package.optional-dependencies]
+bench = [
     { name = "ai-edge-litert" },
-    { name = "coremltools" },
-    { name = "litert-torch" },
     { name = "mnn" },
     { name = "ncnn" },
+    { name = "onnxruntime" },
+    { name = "openvino" },
+]
+export = [
+    { name = "coremltools" },
+    { name = "gdown" },
+    { name = "litert-torch" },
     { name = "nncf" },
     { name = "onnx" },
-    { name = "onnxruntime" },
     { name = "onnxslim" },
-    { name = "opencv-python" },
-    { name = "openvino" },
     { name = "pnnx" },
-    { name = "ultralytics" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "gdown" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "ai-edge-litert", specifier = ">=2.1.2" },
-    { name = "coremltools", specifier = ">=9.0" },
-    { name = "litert-torch", specifier = ">=0.8.0" },
-    { name = "mnn", specifier = ">=3.0.0" },
-    { name = "ncnn", specifier = ">=1.0.20240410" },
-    { name = "nncf", specifier = ">=2.14.0" },
-    { name = "onnx", specifier = ">=1.22.0" },
-    { name = "onnxruntime", specifier = ">=1.28.0" },
-    { name = "onnxslim", specifier = ">=0.1.95" },
+    { name = "ai-edge-litert", marker = "extra == 'bench'", specifier = ">=2.1.2" },
+    { name = "coremltools", marker = "extra == 'export'", specifier = ">=9.0" },
+    { name = "gdown", marker = "extra == 'export'", specifier = ">=6.1.0" },
+    { name = "litert-torch", marker = "extra == 'export'", specifier = ">=0.8.0" },
+    { name = "mnn", marker = "extra == 'bench'", specifier = ">=3.0.0" },
+    { name = "ncnn", marker = "extra == 'bench'", specifier = ">=1.0.20240410" },
+    { name = "nncf", marker = "extra == 'export'", specifier = ">=2.14.0" },
+    { name = "onnx", marker = "extra == 'export'", specifier = ">=1.22.0" },
+    { name = "onnxruntime", marker = "extra == 'bench'", specifier = ">=1.28.0" },
+    { name = "onnxslim", marker = "extra == 'export'", specifier = ">=0.1.95" },
     { name = "opencv-python", specifier = ">=5.0.0.93" },
-    { name = "openvino", specifier = ">=2025.0.0" },
-    { name = "pnnx", specifier = ">=20260526" },
+    { name = "openvino", marker = "extra == 'bench'", specifier = ">=2025.0.0" },
+    { name = "pnnx", marker = "extra == 'export'", specifier = ">=20260526" },
     { name = "ultralytics", specifier = ">=8.4.115" },
 ]
+provides-extras = ["export", "bench"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "gdown", specifier = ">=6.1.0" }]
+dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 
 [[package]]
 name = "cycler"
