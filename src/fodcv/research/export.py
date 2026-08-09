@@ -122,14 +122,14 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
     return out
 
 
-def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
+def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
         precisions=None, imgsz=IMGSZ, force=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
-    weights = Path(weights) if weights else run_weights(run)
+    weights = Path(weights) if weights else run_weights(run_id)
     assert weights.exists(), (
-        f"no weights at {weights} -- train.py, then migrate_artifacts.py --run {run}"
+        f"no weights at {weights} -- train.py, then migrate_artifacts.py --run {run_id}"
     )
     data_yaml = dataset_yaml(dataset)
     assert data_yaml.exists(), (

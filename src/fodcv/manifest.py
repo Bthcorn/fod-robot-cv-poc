@@ -34,6 +34,15 @@ def key(fmt: str, label: str) -> str:
     return f"{fmt}:{label}"
 
 
+def is_sentinel(entry: str) -> bool:
+    """Is this cell an explanation rather than an artifact path?
+
+    The one place the sentinel prefix is matched. migrate_artifacts used to
+    re-derive it, which is how the two sides came to disagree in the first place.
+    """
+    return entry.startswith(_SENTINELS)
+
+
 def load(manifest_path) -> dict:
     return json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
 
@@ -50,7 +59,7 @@ def save(manifest_path, manifest: dict):
 def built(manifest: dict, manifest_path, fmt: str, label: str):
     """The artifact path for this cell, or None if there isn't a usable one."""
     entry = manifest.get(key(fmt, label), "")
-    if not entry or entry.startswith(_SENTINELS):
+    if not entry or is_sentinel(entry):
         return None
     path = Path(manifest_path).parent / entry
     return path if path.exists() else None

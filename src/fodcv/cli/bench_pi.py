@@ -22,7 +22,7 @@ def main():
     args = parser.parse_args()
 
     pi.run(
-        run=args.run,
+        run_id=args.run,
         dataset=args.dataset,
         weights=args.weights,
         models=args.models,

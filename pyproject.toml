@@ -8,13 +8,17 @@ requires-python = ">=3.12"
 # Both hosts. Everything needed to load a model and run inference.
 dependencies = [
     "opencv-python>=5.0.0.93",
+    "pyyaml>=6.0",
     "ultralytics>=8.4.115",
 ]
 
 [project.optional-dependencies]
-# Mac only: the converter toolchain. None of this is installable on the Pi --
-# litert-torch ships no aarch64 wheel and coremltools is Apple-only -- which is
-# why export happens off-Pi and the artifacts are rsynced over.
+# The Mac-side toolchain. Mostly converters, and none of those install on the
+# Pi -- litert-torch ships no aarch64 wheel and coremltools is Apple-only --
+# which is why export happens off-Pi and the artifacts are rsynced over. gdown
+# is the odd one out: it fetches the FOD-A zip for fodcv-prepare and would
+# install anywhere, but dataset prep is Mac-side too, so it rides along here
+# rather than earning a third extra.
 export = [
     "coremltools>=9.0",
     "gdown>=6.1.0",

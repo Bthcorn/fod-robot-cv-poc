@@ -109,7 +109,9 @@ def test_preparing_a_second_dataset_leaves_the_first_alone(registered):
 
 def test_preparing_over_an_existing_dataset_refuses(registered):
     dataset.prepare("scratch-a")
-    with pytest.raises(AssertionError, match="already exists"):
+    # FileExistsError, not AssertionError: `python -O` would strip the assert and
+    # leave the rmtree behind it unguarded.
+    with pytest.raises(FileExistsError, match="already exists"):
         dataset.prepare("scratch-a")
 
 

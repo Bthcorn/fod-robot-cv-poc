@@ -79,7 +79,7 @@ def migrate(source_dir, run: str, dataset: str):
     new_manifest_path = dest / mf.NAME
     rewritten = {}
     for key, entry in old_manifest.items():
-        if entry.startswith((mf.FAILED, mf.UNSUPPORTED)):
+        if mf.is_sentinel(entry):
             rewritten[key] = entry  # a sentinel is still the answer for that cell
             continue
         # Old entries are absolute paths into weights_dir; the artifact now sits
@@ -106,7 +106,7 @@ def migrate(source_dir, run: str, dataset: str):
     run_metadata(run).write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"run.json -> {run_metadata(run)}")
 
-    unresolved = [k for k in rewritten if not rewritten[k].startswith((mf.FAILED, mf.UNSUPPORTED))
+    unresolved = [k for k in rewritten if not mf.is_sentinel(rewritten[k])
                   and not mf.built(rewritten, new_manifest_path, *k.split(":"))]
     assert not unresolved, f"manifest entries do not resolve after migration: {unresolved}"
 

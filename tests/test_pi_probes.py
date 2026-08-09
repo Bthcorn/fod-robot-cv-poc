@@ -1,6 +1,8 @@
 import statistics
 
-from fodcv.bench.pi import parse_pmic
+import pytest
+
+from fodcv.bench.pi import artifact_for, p95, parse_pmic
 
 PMIC_SAMPLE = """
 3V3_SYS_A current(1)=0.5000A
@@ -25,11 +27,19 @@ def test_parse_pmic_returns_none_off_pi():
     assert parse_pmic("") is None
 
 
+def test_an_int8_fallback_export_without_calibration_data_fails_loudly(tmp_path):
+    """The Pi has no calibration set, and the only yaml to hand is the split the
+    cell is scored against. Calibrating on it is the leak export.py's calib_yaml
+    exists to close, so the cell must fail instead of producing a flattering
+    INT8 number. Raises before any model load, hence no weights needed."""
+    with pytest.raises(RuntimeError, match="no INT8 calibration set"):
+        artifact_for(str(tmp_path / "best.pt"), "onnx", "int8", 8, None)
+
+
 def test_nearest_rank_p95_never_invents_a_latency():
-    """Mirrors time_inference: nearest rank on a sorted list, no interpolation,
-    so a reported p95 is always a latency that was actually measured."""
+    """The function time_inference calls, not a copy of its expression -- a copy
+    passes happily while the production one drifts."""
     latencies = sorted([10.0, 11, 12, 13, 14, 15, 16, 17, 18, 100])
-    p95 = latencies[min(int(0.95 * len(latencies)), len(latencies) - 1)]
-    assert p95 == 100
-    assert p95 in latencies
+    assert p95(latencies) == 100
+    assert p95(latencies) in latencies
     assert statistics.median(latencies) == 14.5

@@ -68,6 +68,49 @@ def test_ema_smooths_a_single_bad_frame():
     assert tracks[0].ema_conf > policy.CAUTION_THRESH
 
 
+def test_a_confirmed_track_holds_confirm_through_the_middle_band():
+    """The latch, and the reason two thresholds alone are not hysteresis: an EMA
+    that dips between CAUTION and CONFIRM must not flicker back to CAUTION."""
+    track = Track((0, 0), 0.9)
+    assert track.state() == "CONFIRM"
+
+    track.update((0, 0), 0.0)
+    assert track.ema_conf == pytest.approx(0.54)
+    assert track.state() == "CONFIRM"
+
+    track.update((0, 0), 0.0)
+    assert policy.CAUTION_THRESH < track.ema_conf < policy.CONFIRM_THRESH
+    assert track.state() == "CONFIRM", "latched -- only a drop below CAUTION demotes"
+
+
+def test_a_confirmed_track_demotes_below_the_lower_threshold():
+    """The latch holds, it does not stick: hysteresis, not a one-way ratchet."""
+    track = Track((0, 0), 0.9)
+    for _ in range(3):
+        track.update((0, 0), 0.0)
+    assert track.ema_conf < policy.CAUTION_THRESH
+    assert track.state() == "IGNORE"
+
+
+def test_an_unconfirmed_track_stays_caution_in_the_middle_band():
+    """The latch only holds a confirmation that was actually earned."""
+    conf = policy.CAUTION_THRESH + 0.05
+    track = Track((0, 0), conf)
+    assert track.state() == "CAUTION"
+    track.update((0, 0), conf)
+    assert track.state() == "CAUTION"
+
+
+def test_a_caution_track_promotes_once_its_ema_reaches_confirm():
+    """Closing distance improves the angle, which is what the EMA is there to
+    accumulate -- the promotion half still has to work."""
+    track = Track((0, 0), 0.3)
+    assert track.state() == "CAUTION"
+    track.update((0, 0), 1.0)
+    assert track.ema_conf >= policy.CONFIRM_THRESH
+    assert track.state() == "CONFIRM"
+
+
 @pytest.mark.parametrize(
     "ema, expected",
     [

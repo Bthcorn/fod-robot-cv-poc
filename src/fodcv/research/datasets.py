@@ -81,6 +81,20 @@ SOURCES: dict[str, VocSource | YoloSource] = {
     # recovered at evaluation time from the seeding log. So this is 1 class, not
     # the 4 the FOD-A comparison uses.
     #
+    # BEFORE REGISTERING THIS, read PRD §10 step 4: "Split 70/15/15, grouped so
+    # one scene never spans train and test; keep a cross-venue holdout from the
+    # machine-shop visit." None of that is implemented, and it does not apply to
+    # FOD-A -- §10 step 1 calls FOD-A a pretraining prior, not a test set, which
+    # is why `split()` is still a plain per-image shuffle into train/val:
+    #   - A *scene* is one difference-imaging camera lock (§10 step 3: lock the
+    #     camera, shoot bg, place fasteners, shoot fg), so a single scene spans
+    #     many near-identical images. Shuffling per image puts the same scene on
+    #     both sides of the split and inflates held-out mAP. Group first.
+    #   - There is no test split at all yet; val_fraction cuts train/val only.
+    #   - The cross-venue holdout is a collection decision (which shoot is held
+    #     out), not something a split fraction can express -- most likely its own
+    #     dataset-id rather than a slice of this one.
+    #
     # "arena-v1": YoloSource(
     #     source_dir=Path("~/Downloads/arena-export").expanduser(),
     #     class_names={0: "metal_fastener"},

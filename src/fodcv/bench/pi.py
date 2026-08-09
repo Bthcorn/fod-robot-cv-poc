@@ -47,6 +47,7 @@ import time
 from pathlib import Path
 
 import cv2
+import yaml
 from ultralytics import YOLO
 
 from fodcv import manifest as mf
@@ -159,6 +160,15 @@ def load_images(paths: list[Path], count: int) -> list:
     return frames
 
 
+def p95(sorted_ms: list[float]) -> float:
+    """Nearest-rank p95.
+
+    ponytail: 50 samples doesn't justify interpolation, and nearest-rank never
+    reports a latency that wasn't actually measured.
+    """
+    return sorted_ms[min(int(0.95 * len(sorted_ms)), len(sorted_ms) - 1)]
+
+
 def time_inference(model: YOLO, frames: list) -> dict:
     """Median/p95 wall-clock plus the medians of Ultralytics' own stage split."""
     for i in range(WARMUP):
@@ -172,11 +182,9 @@ def time_inference(model: YOLO, frames: list) -> dict:
         stages.append(results[0].speed)
 
     latencies.sort()
-    # ponytail: nearest-rank p95 on a sorted list -- 50 samples doesn't justify
-    # interpolation, and nearest-rank never reports a latency that wasn't seen.
     row = {
         "median_ms": statistics.median(latencies),
-        "p95_ms": latencies[min(int(0.95 * len(latencies)), len(latencies) - 1)],
+        "p95_ms": p95(latencies),
     }
     for stage in ("preprocess", "inference", "postprocess"):
         row[f"{stage}_ms"] = statistics.median(s[stage] for s in stages)
@@ -198,6 +206,15 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
     # Fallback only. On the Pi this cannot work for litert at all (no aarch64
     # converter), and every other format is better built once on the Mac -- the
     # `exported` marker in the CSV means the rsync missed.
+    if takes_calibration(fmt, quantize) and calib is None:
+        # The only calibration set on hand here would be the eval split, and
+        # calibrating on the split we then score against is exactly the leak
+        # research/export.py's calib_yaml() exists to close. A FAILED cell is
+        # the honest outcome; a flattering INT8 number is not.
+        raise RuntimeError(
+            f"no INT8 calibration set for {fmt} on this host -- run fodcv-export "
+            f"on the Mac and rsync artifacts/<run>/ over"
+        )
     exported = YOLO(weights).export(
         format=fmt,
         imgsz=IMGSZ,
@@ -293,28 +310,22 @@ def soak(weights: str, fmt: str, label: str, frames: list, seconds: int, calib):
     print(f"wrote {out} -- {done} frames over {seconds}s")
 
 
+def run_provenance(run: str) -> dict:
+    """run.json for this run, or {} for one migrated before provenance existed."""
+    meta_path = run_metadata(run)
+    return json.loads(meta_path.read_text()) if meta_path.exists() else {}
+
+
 def dataset_of(run: str) -> str | None:
     """The dataset this run was trained on, from run.json. None if unrecorded."""
-    meta_path = run_metadata(run)
-    return json.loads(meta_path.read_text()).get("dataset") if meta_path.exists() else None
+    return run_provenance(run).get("dataset")
 
 
 def class_names_in(data_yaml: Path) -> dict[int, str]:
-    """The `names:` block, parsed without pulling in a yaml dependency.
-
-    The file is written by write_data_yaml, so the shape is known: two-space
-    indented `<id>: <name>` lines under `names:` and nothing after them.
-    """
-    names, in_names = {}, False
-    for line in data_yaml.read_text().splitlines():
-        if line.startswith("names:"):
-            in_names = True
-        elif in_names and line.startswith("  "):
-            cid, _, name = line.strip().partition(":")
-            names[int(cid)] = name.strip()
-        elif in_names and line.strip():
-            break
-    return names
+    """The `names:` block. PyYAML rather than a hand parser: ultralytics already
+    depends on it, so the bespoke reader bought nothing but a way to drift from
+    the format write_data_yaml emits."""
+    return yaml.safe_load(data_yaml.read_text())["names"]
 
 
 def eval_split(run: str, dataset: str):
@@ -344,12 +355,9 @@ def check_class_agreement(run: str, data_yaml: Path):
     mismatched pairing. run.json records what the run was trained on, so when it
     is present the two can actually be compared.
     """
-    meta_path = run_metadata(run)
-    if not meta_path.exists():
-        return  # pre-provenance run; nothing to compare against
-    trained = json.loads(meta_path.read_text()).get("classes")
+    trained = run_provenance(run).get("classes")
     if not trained:
-        return
+        return  # pre-provenance run; nothing to compare against
     scoring = {str(cid): name for cid, name in class_names_in(data_yaml).items()}
     assert trained == scoring, (
         f"class mismatch: run {run!r} was trained on {trained}, "
@@ -357,7 +365,7 @@ def check_class_agreement(run: str, data_yaml: Path):
     )
 
 
-def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, formats=None,
+def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, formats=None,
         precisions=None, threads=None, run_val=True, soak_seconds=0):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
@@ -365,23 +373,23 @@ def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, for
     if threads:
         apply_threads(threads)
 
-    data_yaml, val_images = eval_split(run, dataset)
+    data_yaml, val_images = eval_split(run_id, dataset)
     if run_val:
-        check_class_agreement(run, data_yaml)
+        check_class_agreement(run_id, data_yaml)
     image_paths = sorted(val_images.glob("*.jpg"))
     assert image_paths, f"no val images in {val_images}"
     frames = load_images(image_paths, WARMUP + RUNS)
 
-    models = models or [weights or str(run_weights(run))]
-    # Calibration data is Mac-side only; the fallback keeps a Pi-local export
-    # from crashing, though such a cell is already the `exported` warning sign.
+    models = models or [weights or str(run_weights(run_id))]
+    # Calibration data is Mac-side only. None, not the eval yaml: substituting
+    # the split we score against would calibrate INT8 on its own test set.
     calib = calib_yaml_path(dataset)
-    calib = calib if calib.exists() else data_yaml
+    calib = calib if calib.exists() else None
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     conditions = board_conditions()
     conditions["weights"] = ", ".join(models)
-    conditions["dataset"] = dataset_of(run) or dataset
+    conditions["dataset"] = dataset_of(run_id) or dataset
     print("board conditions:")
     for k, v in conditions.items():
         print(f"  {k}: {v}")

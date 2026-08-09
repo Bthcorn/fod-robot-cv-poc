@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
 
     export.run(
-        run=args.run,
+        run_id=args.run,
         dataset=args.dataset,
         weights=args.weights,
         formats=args.formats,

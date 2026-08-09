@@ -7,8 +7,11 @@ De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot P
 ```
 src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only,
                     bench/ measures, the top level is shared.
-src/fodcv/cli/      one module per command, argparse only. Wired to console
-                    scripts in pyproject.toml -- see Commands below.
+src/fodcv/cli/      one module per command: argparse, then the call into the
+                    package module that does the work. The two camera helpers
+                    are self-contained -- Mac-only stand-ins, not pipeline
+                    steps. Wired to console scripts in pyproject.toml -- see
+                    Commands below.
 tests/
 data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
@@ -139,7 +142,7 @@ Live testing with v1's weights showed detection confidence dropping as the camer
 
 **What changed:**
 - `train.py --angle-aug` — adds Ultralytics' native `degrees`/`shear`/`perspective`/`scale` augmentation (0/default in v1) to push the model toward viewpoint robustness. Writes to `runs/train_<dataset>_aug`, v1's `runs/train_<dataset>` untouched.
-- `confidence_policy.py` — new prototype: two-tier hysteresis (`CAUTION_THRESH=0.25`, `CONFIRM_THRESH=0.5`) instead of one hard cutoff, plus a simple greedy centroid tracker with an EMA of confidence per tracked detection across frames. Since the robot closes distance on approach, angle/range improve frame-to-frame — acting on the EMA rather than a single frame's score avoids dropping a real detection just because one frame's angle was unfavorable.
+- `confidence_policy.py` — new prototype: two-tier hysteresis (`CAUTION_THRESH=0.25`, `CONFIRM_THRESH=0.5`) instead of one hard cutoff, plus a simple greedy centroid tracker with an EMA of confidence per tracked detection across frames. The confirmation **latches**: a track promoted to CONFIRM holds it until its EMA falls back below `CAUTION_THRESH`. Two thresholds without the latch is only a three-bucket classifier — an EMA sitting on either boundary still flips state every frame, which is the flicker FR-4 asks hysteresis to remove. Since the robot closes distance on approach, angle/range improve frame-to-frame — acting on the EMA rather than a single frame's score avoids dropping a real detection just because one frame's angle was unfavorable.
 
 **v1 vs v2 mAP50 / mAP50-95:** TBD — fill in after running `uv run fodcv-train --dataset fod-a --angle-aug` and comparing against the existing `runs/train_poc` metrics (the v1 run predates the `train_<dataset>` naming).
 
@@ -226,7 +229,7 @@ Latency was also captured (`runs/bench_pi/results.csv`) but is **Apple M4, singl
 ### What the rewrite fixed
 
 - **The mAP columns were meaningless.** The first draft exported stock COCO `yolo11n.pt`/`yolo26n.pt` and then `val()`'d them against the 4-class fastener `data.yaml`. Now defaults to the fine-tuned `best.pt` via `confidence_policy.resolve_weights()`.
-- **INT8 calibration leaked the eval set.** `data=data.yaml` calibrates on the *val* split, which is also the mAP evaluation set — that shrinks the INT8 drop AC-2 asks us to report. `export.py` now generates a `data-calib.yaml` with `val:` repointed at the train images.
+- **INT8 calibration leaked the eval set — in two places.** `data=data.yaml` calibrates on the *val* split, which is also the mAP evaluation set; that shrinks the INT8 drop AC-2 asks us to report. `export.py` now generates a `data-calib.yaml` with `val:` repointed at the train images. `bench_pi.py` then reopened the same hole from the other side: the train split is deliberately never shipped to the Pi, so its fallback export substituted the eval yaml whenever `data-calib.yaml` was absent — which is always, on the Pi. An INT8 cell with no calibration set now fails the row instead, naming the rsync fix. No number beats a flattering one.
 - **Ultralytics 8.4.115 changed the export API.** `int8=True` → `quantize=8` (old form still works via a deprecation shim), and `format="tflite"` → `format="litert"`.
 - **NCNN has no INT8 export path.** It is absent from Ultralytics' `INT8_FORMATS`; `quantize=8` hard-asserts. FP16 is NCNN's only quantized path, so **"NCNN INT8" in PRD FR-1 (and the §10 export table) is not a buildable target** with this toolchain. The matrix reads precision support from Ultralytics' own `INT8_FORMATS`/`FP16_FORMATS` tables so it tracks the library instead of a hand-kept list. ONNX INT8, conversely, *is* supported now and was missing from the original shortlist.
 - **`ncnn` the runtime ≠ the export dependency.** Ultralytics needs `pnnx` to convert, and its auto-install fails inside `uv` (no `pip`) — the same trap as above, hit again. `uv add pnnx nncf ncnn openvino mnn` up front. `nncf` (required for OpenVINO INT8) also downgraded numpy 2.5.1 → 2.4.6; torch stayed at 2.9.1.

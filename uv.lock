@@ -355,6 +355,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "opencv-python" },
+    { name = "pyyaml" },
     { name = "ultralytics" },
 ]
 
@@ -396,6 +397,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=5.0.0.93" },
     { name = "openvino", marker = "extra == 'bench'", specifier = ">=2025.0.0" },
     { name = "pnnx", marker = "extra == 'export'", specifier = ">=20260526" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ultralytics", specifier = ">=8.4.115" },
 ]
 provides-extras = ["export", "bench"]
