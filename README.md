@@ -198,17 +198,20 @@ Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/
 | B | `uv run fodcv-bench --run poc-v1 --models yolo26n.pt --precisions fp32` | YOLO26n's NMS-free head — watch `postprocess_ms` and p95. Stock COCO weights, so **latency only**, ignore its mAP |
 | C | `taskset -c 0-{n-1} uv run fodcv-bench --run poc-v1 --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
 | D | `uv run fodcv-bench --run poc-v1 --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
-
 | E | `uv run fodcv-bench --run poc-v1-{n} --imgsz {n} --formats ncnn --precisions fp32 fp16` for n ∈ 320/480/640 | Whether FR-2's "recall collapses at 320" holds, and where the latency/mAP Pareto point actually sits |
+| F | `uv run fodcv-bench --run poc-v1-480 --imgsz 480 --formats ncnn litert mnn onnx openvino hailo --precisions fp32 fp16 int8 --threads 4 --cooldown 120 --temp-target 66` | The whole matrix at the deployed resolution, Hailo-8 included. Needs the `.hef` from `docker/hailo-compile.sh` and a `pyhailort` wheel built for the venv's Python |
 
 Active Cooler on for all stages. Stage C needs `taskset` as well as `--threads` because `OMP_NUM_THREADS` reaches ONNX/OpenVINO/NCNN but not the LiteRT interpreter — pinning cores constrains all five backends identically.
 
-**Two board settings must be right or the ranking is fiction.** Both were learned the hard way:
+**Three things must be right or the ranking is fiction.** All three were learned the hard way:
 
 1. **`--cooldown 120 --temp-target 66`.** Without it, 13 cells run back-to-back on a warming board and position in the loop outweighs runtime. The first Pi run went 61 → 80 °C and the drift control fired at **+20.3%**.
 2. **`sudo cpupower frequency-set -g performance`** (or write `performance` to each `cpu*/cpufreq/scaling_governor`). The Pi 5 defaults to `ondemand`, which idles the A76 at 1.5 GHz against a 2.4 GHz max. Adding the cooldown *alone* made ncnn FP32 read **slower** (88 → 100 ms) because each cell now started on a cold, down-clocked core — a thermal confound swapped for a frequency one. `bench_pi.py` records `cpu_governor` and warns when it is not `performance`.
+3. **No desktop session.** Found late, and it silently taxed every number before Stage F. With VS Code and a graphical session live, NCNN FP16 @480 read p95 **102.9 ms against a 45.3 ms median**; on an idle board the same cell is **44.8 against 44.4**. Medians moved 2–12% too. Nothing in `conditions.txt` catches this — the governor is right, `throttled` is `0x0`, drift is in band, and the numbers are still wrong. Log out of the desktop, or check `ps -eo pcpu,comm --sort=-pcpu` before trusting a sweep.
 
-With both applied, drift fell to **+2.4% / +0.4% / +1.0%** across the three sweep runs.
+Ordering matters as well: put a CPU format first in `--formats`, because the drift control re-runs the *first* ok cell. With `hailo` first it reported −11% twice — that is the accelerator's own warm-up, not the board's drift.
+
+With all three applied, drift lands at **−2.6%** (matrix) and **+0.4%** (two-core pair).
 
 ### Measured on the Pi 5 — Stage A (`runs/bench_pi/results.csv`)
 
@@ -253,7 +256,9 @@ Governor pinned, cooldown on, drift ≤ 2.4%. NCNN only, since it won Stage A.
 
 **NCNN FP16 is a size win, not a speed win.** Within noise at every size (−1.7% at 640, +0.6% at 480, −4.5% at 320) with identical mAP, while halving the artifact to ~5.3 MB. Ultralytics does not expose ncnn's `use_fp16_arithmetic`, so the export is FP16 *storage* over an FP32 compute path. Worth taking for the smaller artifact; worth nothing for latency.
 
-**Deployed configuration: NCNN FP16 @ 480 — 53.2 ms, 18.8 FPS, mAP50 0.718, 5.33 MB.** FP32 @ 480 is statistically identical and 2× the size; pick FP16 for the download, FP32 if you want the marginally better mAP50. Against App. B.2 at `d = 0.3 m` this lifts `v_fast` from ~1.1 to **~1.4 m/s**, and leaves ~1.05 m/s even if M-8 contention halves the core budget.
+**Best CPU configuration: NCNN FP16 @ 480 — 53.2 ms, 18.8 FPS, mAP50 0.718, 5.33 MB.** FP32 @ 480 is statistically identical and 2× the size; pick FP16 for the download, FP32 if you want the marginally better mAP50. Against App. B.2 at `d = 0.3 m` this lifts `v_fast` from ~1.1 to **~1.4 m/s**, and leaves ~1.05 m/s even if M-8 contention halves the core budget.
+
+> **Superseded on latency by Stage F.** These cells ran with a desktop session live on the Pi. Idle, the same NCNN FP16 @480 cell is **44.4 ms / 22.5 FPS**, not 53.2 / 18.8. The *conclusions* here all survive — 480 over 640, FP16 as a size win rather than a speed win, FR-2 amended — because every row was equally taxed. Quote Stage F's numbers, this section's reasoning.
 
 One caveat on the Stage A vs Stage E baselines: Stage A's 88.4 ms for ncnn FP32 was measured mid-matrix on a hot, `ondemand` board; Stage E's 99.8 ms is the same cell measured properly. **99.8 ms is the honest 640 baseline** — quote that, not 88.4.
 
@@ -272,6 +277,48 @@ Stock COCO weights, imgsz 480, latency only, drift +2.6%:
 **No gain worth switching for.** 53.0 vs 53.5 ms is 1%, inside the 2.6% drift band. The NMS-free head does not even show up where it should — `postprocess_ms` is 1.2 vs YOLO11n's 1.0 on the same backend. The "43% faster CPU ONNX" claim is not reproduced here at 480 on NCNN.
 
 That leaves STAL small-object accuracy as YOLO26n's only remaining argument, and testing it needs a fine-tune on FOD-A — real work, and not on the critical path now that Stage E has met the throughput goal. Park it.
+
+Re-measured on an idle board alongside Stage F: **45.5 ms vs YOLO11n's 44.8**, postprocess 1.1 vs 1.0. Same verdict, cleaner board.
+
+### Stage F — Hailo-8 @ 480, and the first INT8 path that keeps its accuracy
+
+`runs/bench_pi/results_480_final.csv`. Idle board, governor pinned, cooldown on, drift **−2.6%**, `throttled=0x0`, 65.5 → 71.0 °C. Latency from a latency-only sweep; mAP carried from the run that measured it, since mAP does not depend on CPU contention.
+
+| Format | Prec | Median ms | p95 ms | p95/med | FPS | CPU ms | mAP50 | mAP50-95 | Size MB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **hailo** | **int8** | **18.0** | 18.4 | 1.03 | **55.7** | **3.30** | **0.725** | 0.440 | 7.58 |
+| litert | int8 | 23.5 | 23.9 | 1.02 | 42.6 | 3.49 | 0.474 | 0.264 | 3.03 |
+| ncnn | fp16 | 44.4 | 44.8 | 1.01 | 22.5 | 3.78 | 0.718 | 0.441 | 5.33 |
+| ncnn | fp32 | 44.8 | 45.7 | 1.02 | 22.3 | 3.76 | 0.721 | 0.441 | 10.48 |
+| mnn | fp32 | 58.1 | 60.5 | 1.04 | 17.2 | 3.80 | 0.720 | 0.436 | 10.45 |
+| mnn | int8 | 58.2 | 59.2 | 1.02 | 17.2 | 3.94 | **0.739** | **0.460** | 2.81 |
+| openvino | fp32 | 64.1 | 65.4 | 1.02 | 15.6 | 3.81 | 0.718 | 0.439 | 10.70 |
+| openvino | fp16 | 65.7 | 72.6 | 1.11 | 15.2 | 4.12 | 0.717 | 0.438 | 5.61 |
+| litert | fp32 | 76.0 | 76.6 | 1.01 | 13.2 | 3.81 | 0.718 | 0.439 | 10.59 |
+| onnx | int8 | 90.5 | 101.8 | 1.13 | 11.0 | 5.81 | 0.606 | 0.360 | 2.99 |
+| onnx | fp32 | 91.5 | 105.0 | 1.15 | 10.9 | 6.04 | 0.718 | 0.439 | 10.53 |
+| openvino | int8 | 154.1 | 163.0 | 1.06 | 6.5 | 3.53 | 0.690 | 0.428 | 3.34 |
+
+CPU ms = `preprocess_ms + postprocess_ms`, the M-8 column.
+
+- **Calibrated INT8 keeps its accuracy; software INT8 never had a compute path.** On a quiet board MNN INT8 is *marginally slower* than its own FP32 (58.2 vs 58.1) and ONNX INT8 lands within 1 ms of its FP32 (90.5 vs 91.5). Files shrink 3.7×, the arithmetic never changes — Stage A's read, now flat rather than merely close. Hailo's INT8, calibrated on 510 train images through the compiler's level-2 optimization, scores **0.725 / 0.440 against an FP32 baseline of 0.721 / 0.441**. The difference is calibration and silicon, not bit width.
+- **MNN INT8 has the best accuracy in the matrix** — 0.739 / 0.460, above the FP32 baseline and above Hailo, in 2.81 MB. It is simply slow. Worth remembering the day accuracy outranks latency.
+- **OpenVINO INT8 confirmed dead**: 154.1 ms against its own 64.1 ms FP32, a 2.4× regression on a cooled board with the clock pinned.
+
+**M-8, two cores** (`taskset -c 0-1 --threads 2`, drift +0.4%) — the measurement that decides the architecture rather than the leaderboard:
+
+| Runtime | 4 cores | 2 cores | Change |
+|---|---:|---:|---|
+| hailo int8 | 18.0 ms | **17.6 ms** | −2%, inside noise |
+| ncnn fp16 | 44.4 ms | **56.5 ms** | **+27%** |
+
+Hailo does not move because its inference is not on the CPU at all — NMS is compiled onto the chip (`end2end=True` for detect), so the host does letterboxing and result parsing, 3.3 ms a frame. Halving the core budget widens the gap from 2.47× to **3.21×**.
+
+**Soak, 600 s** (`soak_480_hailo_idle.csv`): 30,874 frames, **51.8 FPS sustained**, median 19.13 ms, first quarter → last quarter **−0.1%**, 65.5 → 70.0 °C, `throttled=0x0`, 4.11 W median / 6.08 W peak. No thermal decay, and the PCIe link shared with the NVMe never showed up as contention. Note sustained runs ~6% slower than the 50-run burst — **51.8 FPS is the figure for a robot**, 55.7 belongs to the leaderboard.
+
+**What it costs.** The `.hef` is buildable neither on the Pi nor natively on the Mac: it needs an x86-64 Linux Dataflow Compiler under emulation (`docker/hailo-compile.sh`, ~26 min). NMS thresholds are compiled in, so retuning detection sensitivity means recompiling — every CPU backend takes `conf=` at call time. The calibration set is undersized at 510 images against Hailo's recommended ≥1,024, and the network needs three contexts rather than one, so there is headroom this measurement does not reach.
+
+**This is a measurement, not a decision.** Adopting an accelerator is a BOM change gated on advisor sign-off (O-2), and PRD v2 commits to Pi 5 CPU-only. Do not amend FR-1/§8 from this alone.
 
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 
@@ -316,9 +363,9 @@ Latency was also captured (`runs/bench_pi/results.csv`) but is **Apple M4, singl
 
 `vcgencmd pmic_read_adc` gives per-rail V and A; `bench_pi.py` sums V×A and applies the community calibration `real_w ≈ pmic_sum × 1.15 + 0.6`. It is an estimate, not a meter — the PMIC does not feed USB, HATs or NVMe. NFR-1 still wants the USB meter; run one cell against it and correct the constants in `board_power_w()`.
 
-### Accelerators considered, none adopted
+### Accelerators — one measured, none adopted
 
-PRD v2 commits to Pi 5 CPU-only. The Pi 5 and ESP32 are advisor-supplied and the 12,245–15,095 ฿ budget is blocked on sign-off (O-2), so this is documentation, not a BOM change.
+PRD v2 commits to Pi 5 CPU-only. The Pi 5 and ESP32 are advisor-supplied and the 12,245–15,095 ฿ budget is blocked on sign-off (O-2), so this is documentation, not a BOM change. A **Hailo-8** on a dual-M.2 HAT is now in hand and measured — see Stage F. The rest of this table stays a paper comparison.
 
 | Option | Compute | Note |
 |---|---|---|
@@ -332,6 +379,6 @@ The IMX500 is the only option that would change the architecture rather than jus
 ## Out of scope
 
 - Real dataset collection and hardware integration — still need the arena per PRD §10.
-- **imgsz sweep.** PRD v2 states `imgsz=640` and "recall collapses at 320" twice, with no measurement behind it — it is not in §16's list of open measurements either. The benchmark holds 640 fixed, so that claim stays untested. Given App. B.2 makes `v_fast` inversely proportional to pipeline latency, a 320/480 Pareto point is worth a later sweep.
-- Benchmarking any accelerator — none are on hand or budgeted.
+- ~~**imgsz sweep.**~~ Resolved by Stage E: 480 is a free 1.87× speedup at unchanged mAP, and "recall collapses at 320" holds but does not justify 640. FR-2 wants amending to `imgsz=480`.
+- Benchmarking accelerators *other than* the Hailo-8 (Stage F) — the rest are neither on hand nor budgeted.
 - End-to-end capture→serial latency (M-3): needs `picamera2` + the ESP32 in the loop. This benchmark supplies the *inference* term of that budget, not the total.
