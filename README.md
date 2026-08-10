@@ -199,9 +199,79 @@ Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/
 | C | `taskset -c 0-{n-1} uv run fodcv-bench --run poc-v1 --formats <winner> --threads {n} --no-val` for n ∈ 1..4 | Whether thread count explains the published contradiction. The n=2 row is the M-8 proxy: the measured cost of leaving 2 cores for BreezySLAM |
 | D | `uv run fodcv-bench --run poc-v1 --formats <winner> --precisions int8 --soak 600` | AC-3 thermals + power under sustained load |
 
+| E | `uv run fodcv-bench --run poc-v1-{n} --imgsz {n} --formats ncnn --precisions fp32 fp16` for n ∈ 320/480/640 | Whether FR-2's "recall collapses at 320" holds, and where the latency/mAP Pareto point actually sits |
+
 Active Cooler on for all stages. Stage C needs `taskset` as well as `--threads` because `OMP_NUM_THREADS` reaches ONNX/OpenVINO/NCNN but not the LiteRT interpreter — pinning cores constrains all five backends identically.
 
-**Measured on the Pi:** TBD — fill in from `runs/bench_pi/results.csv` after stages A–D.
+**Two board settings must be right or the ranking is fiction.** Both were learned the hard way:
+
+1. **`--cooldown 120 --temp-target 66`.** Without it, 13 cells run back-to-back on a warming board and position in the loop outweighs runtime. The first Pi run went 61 → 80 °C and the drift control fired at **+20.3%**.
+2. **`sudo cpupower frequency-set -g performance`** (or write `performance` to each `cpu*/cpufreq/scaling_governor`). The Pi 5 defaults to `ondemand`, which idles the A76 at 1.5 GHz against a 2.4 GHz max. Adding the cooldown *alone* made ncnn FP32 read **slower** (88 → 100 ms) because each cell now started on a cold, down-clocked core — a thermal confound swapped for a frequency one. `bench_pi.py` records `cpu_governor` and warns when it is not `performance`.
+
+With both applied, drift fell to **+2.4% / +0.4% / +1.0%** across the three sweep runs.
+
+### Measured on the Pi 5 — Stage A (`runs/bench_pi/results.csv`)
+
+`best.pt`, imgsz 640, 4 threads, 90 val images, 50 runs. Board 61 → 80 °C, `throttled=0x0`, drift **+20.3% — ranking confounded**, so treat mid-table ordering as unreliable; the extremes hold because heat pushes the wrong way for them.
+
+| Format | Prec | Median ms | p95 ms | FPS | Size MB | mAP50 | mAP50-95 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| **litert** | **int8** | **41.5** | 42.4 | **24.1** | 3.04 | 0.321 | 0.169 |
+| ncnn | fp32 | 88.4 | 101.8 | 11.3 | 10.52 | 0.719 | 0.436 |
+| mnn | int8 | 112.0 | 117.5 | 8.9 | 2.86 | 0.741 | 0.455 |
+| mnn | fp32 | 112.4 | 114.9 | 8.9 | 10.49 | 0.712 | 0.435 |
+| litert | fp32 | 158.8 | 160.1 | 6.3 | 10.63 | 0.719 | 0.436 |
+| openvino | fp32 | 163.8 | 281.0 | 6.1 | 10.74 | 0.719 | 0.436 |
+| onnx | fp32 | 175.6 | 200.0 | 5.7 | 10.61 | 0.719 | 0.436 |
+| onnx | int8 | 176.0 | 179.6 | 5.7 | 3.07 | 0.501 | 0.304 |
+| openvino | int8 | 279.3 | 289.6 | 3.6 | 3.39 | 0.729 | 0.458 |
+| ncnn | int8 | — | — | — | — | — | — |
+
+The on-device numbers confirm what the Mac-side mAP table predicted, and sharpen it:
+
+- **Only LiteRT actually executes INT8.** ONNX INT8 (176.0 vs 175.6 ms) and MNN INT8 (112.0 vs 112.4 ms) are latency-identical to their FP32 twins with near-unchanged mAP. Files shrink; the compute path does not change. That confirms the weight-only-quantization read above, and extends it to ONNX.
+- **OpenVINO INT8 is a speed *regression*** — 279 ms against its own 164 ms FP32, measured early while the board was still cool. Arm float simulation, exactly as the Raspberry Pi source warns. **FR-1's OpenVINO INT8 is dead**, and now by measurement rather than citation.
+- **NCNN INT8 remains unbuildable** (`SKIPPED: Ultralytics has no int8 export path for ncnn`).
+- LiteRT INT8 is genuinely 2.1× faster than the best FP32 — and unusable at mAP50 0.321.
+
+### Stage E — resolution is the real speed lever, and 640 is not the right choice
+
+Governor pinned, cooldown on, drift ≤ 2.4%. NCNN only, since it won Stage A.
+
+| imgsz | Prec | Median ms | p95 ms | FPS | Size MB | mAP50 | mAP50-95 |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 640 | fp32 | 99.8 | 100.9 | 10.0 | 10.52 | 0.719 | 0.436 |
+| 640 | fp16 | 102.2 | 117.1 | 9.8 | 5.37 | 0.719 | 0.437 |
+| **480** | **fp32** | **53.5** | 54.1 | **18.7** | 10.48 | **0.721** | **0.441** |
+| **480** | **fp16** | **53.2** | 54.0 | **18.8** | 5.33 | 0.718 | 0.441 |
+| 320 | fp32 | 22.0 | 22.8 | 45.5 | 10.45 | 0.451 | 0.237 |
+| 320 | fp16 | 23.0 | 23.4 | 43.5 | 5.30 | 0.451 | 0.239 |
+
+**480 is a free 1.87× speedup.** 99.8 → 53.5 ms at mAP50 0.719 → 0.721 and mAP50-95 0.436 → 0.441 — both *marginally up*, i.e. no measurable loss on a 90-image split. This is the single biggest result of the sweep, and it comes from a PRD constant nobody had measured.
+
+**FR-2 is half right.** "Recall collapses at 320" is confirmed — mAP50 falls to 0.451, a 37% drop. But FR-2 uses that to justify pinning 640, and 480 costs nothing while nearly doubling throughput. **Recommend amending FR-2 to `imgsz=480`**, keeping the 320 rejection.
+
+**NCNN FP16 is a size win, not a speed win.** Within noise at every size (−1.7% at 640, +0.6% at 480, −4.5% at 320) with identical mAP, while halving the artifact to ~5.3 MB. Ultralytics does not expose ncnn's `use_fp16_arithmetic`, so the export is FP16 *storage* over an FP32 compute path. Worth taking for the smaller artifact; worth nothing for latency.
+
+**Deployed configuration: NCNN FP16 @ 480 — 53.2 ms, 18.8 FPS, mAP50 0.718, 5.33 MB.** FP32 @ 480 is statistically identical and 2× the size; pick FP16 for the download, FP32 if you want the marginally better mAP50. Against App. B.2 at `d = 0.3 m` this lifts `v_fast` from ~1.1 to **~1.4 m/s**, and leaves ~1.05 m/s even if M-8 contention halves the core budget.
+
+One caveat on the Stage A vs Stage E baselines: Stage A's 88.4 ms for ncnn FP32 was measured mid-matrix on a hot, `ondemand` board; Stage E's 99.8 ms is the same cell measured properly. **99.8 ms is the honest 640 baseline** — quote that, not 88.4.
+
+### Stage B — YOLO26n buys nothing on latency
+
+The NCNN gate is **resolved: `format=ncnn` exports YOLO26n fine**, despite Ultralytics' model docs omitting NCNN from its format list. Export must still happen on the Mac — the Pi has neither `pnnx` nor `onnx` (they live in the `export` extra), so `--models yolo26n.pt` on the Pi just fails both cells with `ModuleNotFoundError`. Stage the model as its own run dir instead (`artifacts/yolo26n-480/best.pt`) so the manifest ships with it.
+
+Stock COCO weights, imgsz 480, latency only, drift +2.6%:
+
+| Model | Format | Median ms | p95 ms | FPS | postprocess ms |
+|---|---|---:|---:|---:|---:|
+| yolo11n (`best.pt`) | ncnn fp32 | 53.5 | 54.1 | 18.7 | 1.0 |
+| yolo26n | ncnn fp32 | 53.0 | 54.5 | 18.9 | 1.2 |
+| yolo26n | onnx fp32 | 96.6 | 99.3 | 10.4 | 0.4 |
+
+**No gain worth switching for.** 53.0 vs 53.5 ms is 1%, inside the 2.6% drift band. The NMS-free head does not even show up where it should — `postprocess_ms` is 1.2 vs YOLO11n's 1.0 on the same backend. The "43% faster CPU ONNX" claim is not reproduced here at 480 on NCNN.
+
+That leaves STAL small-object accuracy as YOLO26n's only remaining argument, and testing it needs a fine-tune on FOD-A — real work, and not on the critical path now that Stage E has met the throughput goal. Park it.
 
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 

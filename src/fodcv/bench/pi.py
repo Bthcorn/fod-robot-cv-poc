@@ -95,12 +95,43 @@ def apply_threads(n: int):
         os.execve(sys.executable, [sys.executable, *sys.argv], env)
 
 
+def cpu_temp_c() -> float | None:
+    """Core temperature in C, or None off-Pi.
+
+    Split out of board_conditions() because the cooldown polls it every couple of
+    seconds and board_conditions() shells out to vcgencmd four times per call.
+    """
+    temp = Path("/sys/class/thermal/thermal_zone0/temp")
+    return int(temp.read_text()) / 1000 if temp.exists() else None
+
+
+def cool_down(target_c: float, timeout_s: float):
+    """Let the board settle between cells, so loop position isn't the result.
+
+    The drift control at the end of run() *measures* the thermal confound; this is
+    what removes it. Polling beats a fixed sleep -- a fixed span is too short on a
+    warm day and wasted on a cold one. The timeout caps it, because a board that
+    never reaches target (no heatsink, warm room) still has to finish the matrix.
+    """
+    if timeout_s <= 0:
+        return
+    temp = cpu_temp_c()
+    if temp is None or temp <= target_c:
+        return
+    print(f"  cooling: {temp:.1f}C -> {target_c:.0f}C (max {timeout_s:.0f}s)")
+    deadline = time.time() + timeout_s
+    while temp > target_c and time.time() < deadline:
+        time.sleep(2)
+        temp = cpu_temp_c()
+    print(f"  settled at {temp:.1f}C")
+
+
 def board_conditions() -> dict:
     """The setup facts both published benchmarks omit."""
     out = {"platform": platform.platform(), "machine": platform.machine()}
 
-    temp = Path("/sys/class/thermal/thermal_zone0/temp")
-    out["cpu_temp_c"] = f"{int(temp.read_text()) / 1000:.1f}" if temp.exists() else "n/a"
+    temp = cpu_temp_c()
+    out["cpu_temp_c"] = f"{temp:.1f}" if temp is not None else "n/a"
 
     for key, cmd in (
         ("clock_arm_hz", ["vcgencmd", "measure_clock", "arm"]),
@@ -112,6 +143,8 @@ def board_conditions() -> dict:
         except (OSError, subprocess.SubprocessError):
             out[key] = "n/a"
 
+    gov = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+    out["cpu_governor"] = gov.read_text().strip() if gov.exists() else "n/a"
     out["omp_num_threads"] = os.environ.get("OMP_NUM_THREADS", "unset")
     out["cpu_affinity"] = str(sorted(os.sched_getaffinity(0))) if hasattr(os, "sched_getaffinity") else "n/a"
     out["power_w"] = board_power_w()
@@ -169,15 +202,15 @@ def p95(sorted_ms: list[float]) -> float:
     return sorted_ms[min(int(0.95 * len(sorted_ms)), len(sorted_ms) - 1)]
 
 
-def time_inference(model: YOLO, frames: list) -> dict:
+def time_inference(model: YOLO, frames: list, imgsz: int = IMGSZ) -> dict:
     """Median/p95 wall-clock plus the medians of Ultralytics' own stage split."""
     for i in range(WARMUP):
-        model.predict(source=frames[i % len(frames)], imgsz=IMGSZ, verbose=False)
+        model.predict(source=frames[i % len(frames)], imgsz=imgsz, verbose=False)
 
     latencies, stages = [], []
     for i in range(RUNS):
         start = time.perf_counter()
-        results = model.predict(source=frames[i % len(frames)], imgsz=IMGSZ, verbose=False)
+        results = model.predict(source=frames[i % len(frames)], imgsz=imgsz, verbose=False)
         latencies.append((time.perf_counter() - start) * 1000)
         stages.append(results[0].speed)
 
@@ -191,7 +224,7 @@ def time_inference(model: YOLO, frames: list) -> dict:
     return row
 
 
-def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | None):
+def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | None, imgsz: int = IMGSZ):
     """Prefer the Mac-built artifact from exports.json; export here only if absent.
 
     ponytail: a manifest instead of predicting Ultralytics' output filenames --
@@ -217,7 +250,7 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
         )
     exported = YOLO(weights).export(
         format=fmt,
-        imgsz=IMGSZ,
+        imgsz=imgsz,
         quantize=quantize,
         data=str(calib) if takes_calibration(fmt, quantize) else None,
     )
@@ -229,7 +262,8 @@ def artifact_for(weights: str, fmt: str, label: str, quantize, calib: Path | Non
     return claim_artifact(exported, fmt, label), "exported"
 
 
-def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib) -> dict:
+def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib,
+              imgsz: int = IMGSZ) -> dict:
     """One matrix cell. `data_yaml` is None to skip mAP (latency-only sweeps)."""
     quantize = PRECISIONS[label]
     before = board_conditions()
@@ -245,14 +279,14 @@ def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib
         row["status"] = f"SKIPPED: Ultralytics has no {label} export path for {fmt}"
         return row
     try:
-        path, provenance = artifact_for(weights, fmt, label, quantize, calib)
+        path, provenance = artifact_for(weights, fmt, label, quantize, calib, imgsz)
         row["artifact"] = provenance
         model = YOLO(path)
-        row.update(time_inference(model, frames))
+        row.update(time_inference(model, frames, imgsz))
         row["fps"] = 1000 / row["median_ms"]
         row["size_mb"] = size_bytes(path) / 1e6
         if data_yaml:
-            metrics = model.val(data=str(data_yaml), imgsz=IMGSZ, verbose=False)
+            metrics = model.val(data=str(data_yaml), imgsz=imgsz, verbose=False)
             row["map50_95"] = metrics.box.map
             row["map50"] = metrics.box.map50
         row["status"] = "ok"
@@ -267,22 +301,22 @@ def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib
     return row
 
 
-def soak(weights: str, fmt: str, label: str, frames: list, seconds: int, calib):
+def soak(weights: str, fmt: str, label: str, frames: list, seconds: int, calib, imgsz: int = IMGSZ):
     """Hold the winning config under load and watch it heat up.
 
     A 50-run cell finishes in seconds and never reaches steady state. The robot
     runs inference every frame for a whole sweep, so AC-3's thermal and power
     numbers have to come from sustained load, not a sprint.
     """
-    path, _ = artifact_for(weights, fmt, label, PRECISIONS[label], calib)
+    path, _ = artifact_for(weights, fmt, label, PRECISIONS[label], calib, imgsz)
     model = YOLO(path)
-    model.predict(source=frames[0], imgsz=IMGSZ, verbose=False)
+    model.predict(source=frames[0], imgsz=imgsz, verbose=False)
 
     samples, deadline, next_sample, i, done = [], time.time() + seconds, 0.0, 0, 0
     start = time.time()
     while time.time() < deadline:
         t0 = time.perf_counter()
-        model.predict(source=frames[i % len(frames)], imgsz=IMGSZ, verbose=False)
+        model.predict(source=frames[i % len(frames)], imgsz=imgsz, verbose=False)
         latency = (time.perf_counter() - t0) * 1000
         i += 1
         done += 1
@@ -366,7 +400,8 @@ def check_class_agreement(run: str, data_yaml: Path):
 
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, formats=None,
-        precisions=None, threads=None, run_val=True, soak_seconds=0):
+        precisions=None, threads=None, run_val=True, soak_seconds=0, imgsz=IMGSZ,
+        cooldown=0, temp_target=62.0):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -390,20 +425,35 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
     conditions = board_conditions()
     conditions["weights"] = ", ".join(models)
     conditions["dataset"] = dataset_of(run_id) or dataset
+    conditions["imgsz"] = imgsz
+    conditions["cooldown_s"] = cooldown
+    conditions["temp_target_c"] = temp_target if cooldown else "n/a"
     print("board conditions:")
     for k, v in conditions.items():
         print(f"  {k}: {v}")
 
+    # ondemand idles the A76 at 1.5 GHz and ramps under load, so a cell that starts
+    # on a cooled board spends part of its 50 runs at 62% clock -- which is how a
+    # cooldown made ncnn fp32 *slower* (88 -> 100 ms) than the same cell measured
+    # hot. Pin the clock or the cooldown just swaps a thermal confound for a
+    # frequency one.
+    if conditions["cpu_governor"] not in ("performance", "n/a"):
+        print(f"\n  WARNING: governor is '{conditions['cpu_governor']}', not 'performance'.\n"
+              f"  Clock ramps during each cell and early cells read slow. Fix:\n"
+              f"    sudo cpupower frequency-set -g performance")
+
     if soak_seconds:
         print(f"\n=== soak {soak_seconds}s: {models[0]} {formats[0]} {precisions[0]} ===")
-        return soak(models[0], formats[0], precisions[0], frames, soak_seconds, calib)
+        return soak(models[0], formats[0], precisions[0], frames, soak_seconds, calib, imgsz)
 
     rows, sources = [], []
     for model_weights in models:
         for fmt in formats:
             for label in precisions:
                 print(f"\n=== {Path(model_weights).name} {fmt} {label} ===")
-                row = bench_one(model_weights, fmt, label, frames, data_yaml if run_val else None, calib)
+                cool_down(temp_target, cooldown)
+                row = bench_one(model_weights, fmt, label, frames,
+                                data_yaml if run_val else None, calib, imgsz)
                 # Provenance on the row itself: a latency number without the data
                 # behind it is not a result anyone can write up.
                 row["dataset"] = conditions["dataset"]
@@ -424,7 +474,11 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
     if first_ok and len(rows) > 1:
         first_ok, first_src = first_ok
         print(f"\n=== drift control: re-running {first_ok['format']} {first_ok['precision']} ===")
-        again = bench_one(first_src, first_ok["format"], first_ok["precision"], frames, None, calib)
+        # Same cooldown the original cell got, or the control measures the pause
+        # rather than the drift.
+        cool_down(temp_target, cooldown)
+        again = bench_one(first_src, first_ok["format"], first_ok["precision"], frames, None,
+                          calib, imgsz)
         if again["status"] == "ok":
             delta = (again["median_ms"] - first_ok["median_ms"]) / first_ok["median_ms"] * 100
             conditions["drift_pct"] = f"{delta:+.1f}"
@@ -435,7 +489,7 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
     conditions["cpu_temp_c_end"] = board_conditions()["cpu_temp_c"]
     (OUT_DIR / "conditions.txt").write_text(
         "\n".join(f"{k}: {v}" for k, v in conditions.items())
-        + f"\nval_images: {len(image_paths)}\nimgsz: {IMGSZ}\nruns: {RUNS} (warmup {WARMUP})\n"
+        + f"\nval_images: {len(image_paths)}\nruns: {RUNS} (warmup {WARMUP})\n"
     )
 
     fields = ["model", "dataset", "format", "precision", "threads", "artifact", "median_ms", "p95_ms", "fps",
