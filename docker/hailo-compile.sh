@@ -23,7 +23,11 @@
 #     whole thing exits 0 having run nothing.
 #
 # Give the Docker VM >= 10 GB RAM. At the 8 GB default, Layer Noise Analysis is
-# SIGKILLed ~18 min in (exit 137) with no message of its own.
+# SIGKILLed ~18 min in (exit 137) with no message of its own. Docker Desktop ->
+# Settings -> Resources, or quit it and set MemoryMiB/SwapMiB in
+# ~/Library/Group Containers/group.com.docker/settings-store.json (this machine
+# runs 10240/6144). Absent those two keys the VM falls back to its own default,
+# which is where the OOM comes from -- so removing them is the way back.
 #
 set -euxo pipefail
 
