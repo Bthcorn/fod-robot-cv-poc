@@ -320,6 +320,24 @@ Hailo does not move because its inference is not on the CPU at all — NMS is co
 
 **This is a measurement, not a decision.** Adopting an accelerator is a BOM change gated on advisor sign-off (O-2), and PRD v2 commits to Pi 5 CPU-only. Do not amend FR-1/§8 from this alone.
 
+### Live camera on the Hailo — and the first out-of-distribution result
+
+`python3 pi/camera_hailo.py --frames 300` — Camera Module 3 (`imx708`) → letterbox → Hailo → boxes. Run it with the **system** interpreter: `python3-picamera2` is apt-built against Python 3.11 (`_libcamera.cpython-311-aarch64-linux-gnu.so`) and the venv is 3.12, a different C ABI. System 3.11 already carries picamera2, libcamera, `hailo_platform` and cv2, so nothing needs installing. There is no torch or ultralytics in that file — the `.hef` does NMS on-chip, so postprocess is a coordinate transform.
+
+| Stage | Median ms | p95 ms |
+|---|---:|---:|
+| capture | 21.64 | 21.84 |
+| preprocess (letterbox + BGR→RGB) | 1.21 | 1.24 |
+| infer | 10.06 | 10.11 |
+| postprocess | 0.38 | 0.46 |
+| **end-to-end** | **33.30** | 33.56 |
+
+**30.0 FPS, and the camera is the limit, not the chip.** Compute is 11.65 ms of the 33.30 — the remaining 21.6 ms is `capture_array()` blocking on the sensor's 30 fps stream. There is roughly 3× headroom before inference constrains anything, which is the M-3 term the benchmark could not supply on its own. Raw device inference here is ~10 ms against the bench's 14–16 ms `inference_ms`, the difference being Ultralytics' tensor handling rather than the silicon.
+
+**Pointed at a room, the model emits confident nonsense** — full-height boxes labelled `unknown` at 0.90+ on a blank wall, ~4 per frame. That is not a preprocessing bug: the same code path on val images returns the right class in tight boxes (`bolt` 0.36, `unknown` 0.59), which is what the mAP already said. It is a domain gap, and it is measurable: **FOD-A images are 300×300 close-ups whose median object spans 11.1% of the frame — about 53 px at the 480 input.** A room contains nothing at that scale, and the model answers anyway instead of abstaining.
+
+Two consequences worth carrying into integration. The deployed system needs a **false-positive floor** — conf 0.25 is not enough on out-of-distribution scenes, and `unknown` is the class that fires. And the camera geometry has to put real debris near that ~53 px scale, which is App. B.1's pixel-floor problem arriving from the data side rather than the optics side. The next test is physical: real nails, screws and bolts at App. B.2's `d = 0.3 m`.
+
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 
 mAP does not depend on the host, so the AC-2 accuracy half was measurable on the Mac without waiting for the board. Full matrix, `best.pt`, 90 val images, imgsz 640:
