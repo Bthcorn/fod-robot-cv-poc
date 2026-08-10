@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from fodcv.bench import pi
-from fodcv.bench.pi import artifact_for, cool_down, p95, parse_pmic, time_inference
+from fodcv.bench.pi import artifact_for, bench_one, cool_down, p95, parse_pmic, time_inference
 
 PMIC_SAMPLE = """
 3V3_SYS_A current(1)=0.5000A
@@ -66,6 +66,60 @@ def test_cooldown_polls_until_the_board_reaches_target(monkeypatch):
     monkeypatch.setattr(pi.time, "sleep", lambda _: None)
     cool_down(target_c=62.0, timeout_s=30)
     assert next(readings) == 60.0, "should have stopped at the first reading under target"
+
+
+class ExclusiveDeviceModel:
+    """Ultralytics against an accelerator that claims its device exclusively.
+
+    Faithful on the two points the bug turns on: YOLO() only records a path, so
+    the device is opened by the *predictor* on first predict(); and val() builds
+    its own AutoBackend (validator.py:183) rather than reusing that one.
+    """
+
+    live = 0
+
+    def __init__(self, path):
+        self._open = False
+
+    def _claim(self):
+        if self._open:
+            return
+        if ExclusiveDeviceModel.live:
+            raise RuntimeError("HAILO_OUT_OF_PHYSICAL_DEVICES: requested: 1, found: 0")
+        ExclusiveDeviceModel.live += 1
+        self._open = True
+
+    def __del__(self):
+        if getattr(self, "_open", False):
+            ExclusiveDeviceModel.live -= 1
+
+    def predict(self, source, imgsz, verbose):
+        self._claim()
+        return [SimpleNamespace(speed={"preprocess": 1.0, "inference": 2.0, "postprocess": 3.0})]
+
+    def val(self, data, imgsz, verbose):
+        validator_backend = ExclusiveDeviceModel(data)  # validator.py:183, not our backend
+        validator_backend._claim()
+        return SimpleNamespace(box=SimpleNamespace(map=0.44, map50=0.72))
+
+
+def test_a_cell_releases_its_device_before_running_val(monkeypatch):
+    """model.val() builds its own backend instead of reusing the timed one. On an
+    exclusive-device accelerator the second open fails, and the cell reported
+    FAILED *after* recording a good 19 ms median -- latency in the row, no mAP,
+    and Gate 2 rightly throwing the whole row away."""
+    ExclusiveDeviceModel.live = 0
+    monkeypatch.setattr(pi, "YOLO", ExclusiveDeviceModel)
+    monkeypatch.setattr(pi, "artifact_for", lambda *a, **k: ("model.hef", "reused"))
+    monkeypatch.setattr(pi, "size_bytes", lambda _: 7_580_000)
+    monkeypatch.setattr(pi, "board_conditions", lambda: {
+        "omp_num_threads": "4", "cpu_temp_c": "60.0", "power_w": "3.9", "throttled": "0x0"})
+
+    row = bench_one("best.pt", "hailo", "int8", frames=[object()], data_yaml="eval/data.yaml",
+                    calib=None, imgsz=480)
+
+    assert row["status"] == "ok", row["status"]
+    assert row["map50"] == 0.72
 
 
 def test_cooldown_is_a_noop_when_disabled_or_off_pi(monkeypatch):

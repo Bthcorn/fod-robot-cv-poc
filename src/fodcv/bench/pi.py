@@ -36,6 +36,7 @@ Results -> runs/bench_pi/results.csv (+ conditions.txt, soak.csv)
 """
 
 import csv
+import gc
 import json
 import os
 import platform
@@ -286,7 +287,16 @@ def bench_one(weights: str, fmt: str, label: str, frames: list, data_yaml, calib
         row["fps"] = 1000 / row["median_ms"]
         row["size_mb"] = size_bytes(path) / 1e6
         if data_yaml:
-            metrics = model.val(data=str(data_yaml), imgsz=imgsz, verbose=False)
+            # model.val() builds its own backend rather than reusing this one, so
+            # for an accelerator that claims its device exclusively the second
+            # open fails: HAILO_OUT_OF_PHYSICAL_DEVICES, "requested: 1, found: 0".
+            # It cost a whole hailo cell -- timed fine at 19 ms, then reported
+            # FAILED with the latency already in the row. Drop ours first; the
+            # backend releases the device in __del__, and gc.collect() is what
+            # makes that deterministic when a traceback or frame still holds a ref.
+            del model
+            gc.collect()
+            metrics = YOLO(path).val(data=str(data_yaml), imgsz=imgsz, verbose=False)
             row["map50_95"] = metrics.box.map
             row["map50"] = metrics.box.map50
         row["status"] = "ok"
