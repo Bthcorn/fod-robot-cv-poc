@@ -32,6 +32,7 @@ from ultralytics import YOLO
 from fodcv import manifest as mf
 from fodcv.matrix import (
     DEFAULT_PRECISIONS,
+    FMT_EXTRA_ARGS,
     FORMATS,
     IMGSZ,
     PRECISIONS,
@@ -163,10 +164,15 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                             imgsz=imgsz,
                             quantize=quantize,
                             data=str(calib) if takes_calibration(fmt, quantize) else None,
+                            **FMT_EXTRA_ARGS.get(fmt, {}),
                         )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that can't be loaded back is not an export.
-                    YOLO(path).predict(source=str(next(dataset_val_images(dataset).glob("*.jpg"))), verbose=False)
+                    # Except for hailo: HailoBackend opens the PCIe device on load, and the compile
+                    # host (x86 container) is never the inference host, so a good .hef would be
+                    # recorded as FAILED. Its equivalent check is `hailortcli parse-hef` on the Pi.
+                    if fmt != "hailo":
+                        YOLO(path).predict(source=str(next(dataset_val_images(dataset).glob("*.jpg"))), verbose=False)
                     manifest[key] = mf.entry_for(path, manifest_path)
                 except Exception as e:
                     manifest[key] = f"{mf.FAILED}: {type(e).__name__}: {e}"

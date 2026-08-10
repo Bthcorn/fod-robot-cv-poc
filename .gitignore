@@ -21,5 +21,9 @@ artifacts/
 *.onnx
 *.tflite
 
+# The Hailo Dataflow Compiler drops acceleras/allocator/hailo_sdk.* logs in the
+# working directory, which is the repo root when docker/hailo-compile.sh runs.
+*.log
+
 .env
 .mcp.json

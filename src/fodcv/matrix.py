@@ -15,7 +15,12 @@ appendix listing "NCNN INT8".
 import shutil
 from pathlib import Path
 
-from ultralytics.engine.exporter import FP16_FORMATS, INT8_FORMATS, export_formats
+from ultralytics.engine.exporter import (
+    FP16_FORMATS,
+    FP32_UNSUPPORTED_FORMATS,
+    INT8_FORMATS,
+    export_formats,
+)
 
 # Which formats accept a calibration `data=` argument at all. MNN is in
 # INT8_FORMATS but quantizes without calibration data and hard-errors if you
@@ -23,7 +28,16 @@ from ultralytics.engine.exporter import FP16_FORMATS, INT8_FORMATS, export_forma
 FMT_ARGS = dict(zip(export_formats()["Argument"], export_formats()["Arguments"]))
 FMT_SUFFIX = dict(zip(export_formats()["Argument"], export_formats()["Suffix"]))
 
-FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn"]
+FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn", "hailo"]
+
+# Per-format export arguments that are a property of *our* hardware, not a
+# default Ultralytics could pick for us. Splatted into export() the same way
+# takes_calibration() gates `data=`.
+FMT_EXTRA_ARGS = {
+    # The board is a Hailo-8 (26 TOPS). Ultralytics defaults to hailo8l (13
+    # TOPS) when `name` is unset, which compiles a .hef for the wrong part.
+    "hailo": {"name": "hailo8"},
+}
 PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
 # fp16 is off by default: Ultralytics only encodes INT8 in output filenames, and
 # an FP16 ONNX export is a silent no-op on a CPU device anyway. It stays
@@ -37,7 +51,10 @@ def supported(fmt: str, quantize) -> bool:
         return fmt in INT8_FORMATS
     if quantize == 16:
         return fmt in FP16_FORMATS
-    return True
+    # An unset/32 request is FP32, which is universal *except* for the INT8-only
+    # accelerator backends. Without this the UNSUPPORTED sentinel never gets set
+    # for them, so the cell is re-attempted and re-failed on every export run.
+    return fmt not in FP32_UNSUPPORTED_FORMATS
 
 
 def size_bytes(path) -> int:

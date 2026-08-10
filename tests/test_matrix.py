@@ -23,6 +23,13 @@ def test_ncnn_has_no_int8_path():
     assert not supported("ncnn", 8)
 
 
+def test_int8_only_formats_have_no_fp32_cell():
+    """Hailo is INT8-only. If an unset precision reads as supported, the cell
+    never gets the UNSUPPORTED sentinel and re-fails on every export run."""
+    assert not supported("hailo", None)
+    assert supported("hailo", 8)
+
+
 def test_every_format_has_a_default_cell():
     for fmt in FORMATS:
         assert any(supported(fmt, PRECISIONS[p]) for p in DEFAULT_PRECISIONS)
