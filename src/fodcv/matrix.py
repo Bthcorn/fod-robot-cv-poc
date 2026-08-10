@@ -36,7 +36,16 @@ FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn", "hailo"]
 FMT_EXTRA_ARGS = {
     # The board is a Hailo-8 (26 TOPS). Ultralytics defaults to hailo8l (13
     # TOPS) when `name` is unset, which compiles a .hef for the wrong part.
-    "hailo": {"name": "hailo8"},
+    #
+    # conf: hailo bakes NMS into the .hef, so the score threshold is compiled in
+    # and cannot be lowered at inference time (exporter.py writes `conf or 0.25`
+    # into nms_config.json). Every other backend runs NMS on the host, where
+    # model.val() drops the threshold to 0.001 to trace the full PR curve. Left
+    # at 0.25 the hailo row would lose its low-confidence tail and report a
+    # smaller mAP than the same weights earn elsewhere -- a threshold artifact
+    # read as a quantization loss, against a 0.70 accuracy gate. Match val.
+    # A deployment .hef would set this back up; it only costs boxes NMS discards.
+    "hailo": {"name": "hailo8", "conf": 0.001},
 }
 PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
 # fp16 is off by default: Ultralytics only encodes INT8 in output filenames, and
