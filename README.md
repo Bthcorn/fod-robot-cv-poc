@@ -338,6 +338,41 @@ Hailo does not move because its inference is not on the CPU at all — NMS is co
 
 Two consequences worth carrying into integration. The deployed system needs a **false-positive floor** — conf 0.25 is not enough on out-of-distribution scenes, and `unknown` is the class that fires. And the camera geometry has to put real debris near that ~53 px scale, which is App. B.1's pixel-floor problem arriving from the data side rather than the optics side. The next test is physical: real nails, screws and bolts at App. B.2's `d = 0.3 m`.
 
+### Stage G — the physical test: why real nails and screws are missed
+
+Real fasteners in front of the camera, and almost nothing detected. Three separate causes, in the order they were eliminated. Only the first is a bug in this repo.
+
+**1. The lens was parked at 1 m, and nothing ever set it.** Queried live on the board mid-run:
+
+```
+AfMode        None      <- never set; libcamera's default is Manual
+LensPosition  1.0       <- dioptres, i.e. focused at exactly 1.00 m
+FocusFoM      180
+```
+
+`camera_hailo.py` configured resolution, raw mode and `ScalerCrop` and never touched focus, so every frame it had ever captured was focused at 1 m regardless of where the object was. A defocused 50 px screw is missing precisely the detail that makes it a screw, and the imgsz sweep already showed how steep that cliff is — mAP50 **0.721 → 0.451 (−37%)** from input resolution alone, with 42% of FOD-A's boxes already COCO-"small" at 480. `--focus` now runs continuous autofocus by default: **FocusFoM 180 → 757**, lens 1.00 m → 0.71 m, at no measurable frame cost (33.38 ms against the 33.30 ms baseline).
+
+**2. Zoom and `--imgsz` were never the problem.** Frame width is `2·d·tan(hfov/2)`, so an object of length `L` reaches FOD-A's training scale at `d ≈ 7·L / zoom`. A 40 mm screw is correctly sized at **0.28 m at zoom 1.0** — App. B.2's `d = 0.3 m` needs no zoom at all, and at that distance the screw is 49 px in the 480 input against a 50 px training median, with 2304 real sensor pixels across the crop and nothing interpolated. The logged run used `zoom 0.4`, which suits `d ≈ 0.7 m`; nearer than that it was over-magnifying. The startup block now reports the measured distance (`1 / LensPosition`) and the object size that is at training scale there, so this is a readout rather than a calculation.
+
+**3. The model was never taught screws or nails.** Instance counts over `data/fod-a/labels/`:
+
+| class | train | val | top-1 correct on the sharp val split, conf 0.25 |
+|---|---:|---:|---|
+| nail | 72 | 13 | **8/13** — 5 missed outright |
+| screw | **10** | 4 | **1/4** — 3 missed outright |
+| bolt | 157 | 32 | 27/32 |
+| unknown | 271 | 41 | 33/41 |
+
+The 0.725 headline is carried by `bolt` and `unknown`. **Nail and screw — exactly the two objects that fail in front of the camera — are the two weakest classes on the model's own in-distribution, in-focus validation images.** `subset_size=600` (`research/datasets.py`) was a PoC smoke-test cap and it truncated the rare classes hardest.
+
+Cropping cannot rescue this. Cropped so a real screw fills 50% and then 83% of the frame — far above training scale — the model localizes it (`44x88 px` box, about right) but classifies it `unknown 0.52` at every crop. It finds the object and does not know the word.
+
+**The pipeline itself is proven correct**, which is what made the above diagnosable. Pushing val images through `camera_hailo.py`'s *own* letterbox and `to_frame_coords` — not Ultralytics' — returns tight, correctly classed boxes at **IoU 0.82–0.95** (`bolt 0.91` at IoU 0.95). The hand-written preprocessing in that file had never been validated against the 0.725 the `.hef` earns through Ultralytics; it is now.
+
+**Also structural, and unfixable from the camera side:** every one of the 510 training images contains exactly one object (`min 1 / max 1 / mean 1.00`), because `_prepare_voc` keeps an image only `if boxes`. A detector trained that way cannot abstain, which is what the full-frame `unknown` boxes on a desk are.
+
+So the fix is data, not optics. In cost order: drop `subset_size=600`; admit background images with empty labels; reconsider `unknown` (53% of the data, four unrelated shapes, and PRD FR-3 specifies a single `metal_fastener` class anyway); then the arena dataset, which is the real answer. Note `--angle-aug` (`ANGLE_AUG_HYP`) was written for the grazing-angle geometry and **has still never been run**. Worth pairing with any retrain — and note `runs/train_poc/results.csv` peaks at epoch 5 and ends at recall 0.408, so 510 images overfit inside five epochs. More data beats more epochs.
+
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 
 mAP does not depend on the host, so the AC-2 accuracy half was measurable on the Mac without waiting for the board. Full matrix, `best.pt`, 90 val images, imgsz 640:

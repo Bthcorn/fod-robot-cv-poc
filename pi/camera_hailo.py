@@ -19,9 +19,18 @@ also why this runs at all on a stack where ultralytics cannot be imported.
 Default HEF is the conf=0.25 build. The benchmark HEF is compiled at conf=0.001
 so its mAP is comparable to the host-NMS backends, and pointed at a camera it
 emits ~100 junk boxes a frame -- a black test frame alone produced 50.
+
+Focus is set here, and was not before. libcamera defaults AfMode to Manual and
+LensPosition to 1.0 dioptre, so every frame this script ever captured was focused
+at 1 m regardless of where the fastener was -- and a defocused 50 px screw is
+missing exactly the detail that makes it a screw. --focus now runs continuous
+autofocus by default. The lens also answers the question the geometry needs:
+LensPosition is dioptres, so its reciprocal is the measured subject distance, and
+the startup block turns that into the object size that is at training scale here.
 """
 
 import argparse
+import math
 import time
 from pathlib import Path
 
@@ -41,6 +50,47 @@ from hailo_platform import (
 CLASSES = ["nail", "screw", "bolt", "unknown"]
 PAD = 114  # ultralytics' letterbox fill; the model was calibrated behind it
 ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+# FOD-A's median object spans 11.1% of its 300x300 training frame. Every "is this
+# thing big enough for the model to see" question in this file reduces to it.
+TRAIN_SCALE = 0.111
+
+
+def focus_arg(value):
+    """--focus: 'auto', or a subject distance in metres."""
+    if value == "auto":
+        return None
+    distance = float(value)
+    if distance <= 0:
+        raise argparse.ArgumentTypeError("focus must be positive metres, or 'auto'")
+    return distance
+
+
+def scale_constant(hfov_deg):
+    """k, where `length = k * distance * zoom` is the object length that reaches
+    the model at FOD-A's training scale.
+
+    Frame width at distance d is 2*d*tan(hfov/2), narrowed by the sensor crop, and
+    the object has to cover TRAIN_SCALE of it. k(66 degrees) = 0.144, i.e. roughly
+    `distance = 7 * length / zoom` -- which puts a 40 mm screw at 0.28 m, so the
+    PRD's 0.3 m working distance already needs no zoom at all.
+    """
+    return TRAIN_SCALE * 2 * math.tan(math.radians(hfov_deg) / 2)
+
+
+def focus_state(picam):
+    """Measured subject distance in metres, and the focus figure of merit.
+
+    LensPosition is dioptres, so 1/LensPosition is the distance the lens is
+    actually focused at -- which is how an unknown working distance gets measured
+    rather than guessed. 0.0 means infinity. Costs one frame wait.
+    """
+    metadata = picam.capture_metadata()
+    lens = metadata.get("LensPosition") or 0.0
+    return (1.0 / lens if lens else math.inf), metadata.get("FocusFoM", 0)
+
+
+def fmt_m(distance):
+    return "inf" if math.isinf(distance) else f"{distance:.2f} m"
 
 
 def letterbox(frame, size):
@@ -86,6 +136,19 @@ def main():
                    help="sensor readout width. ScalerCrop indexes the full 4608px array, so a binned "
                         "readout has no real pixels to give a tight crop and the result is upscaled "
                         "mush. 2304 sustains 56fps; 4608 is sharpest but caps the sensor at 14.3fps")
+    p.add_argument("--focus", type=focus_arg, default=None, metavar="AUTO|METRES",
+                   help="'auto' (the default) runs continuous autofocus over the full range; "
+                        "a number locks the lens at that subject distance. Nothing set this "
+                        "before, and libcamera's default is Manual at 1.0 m -- so every "
+                        "close-up fastener was photographed out of focus")
+    p.add_argument("--shutter", type=int, default=0, metavar="MICROSECONDS",
+                   help="cap the exposure time; gain stays automatic to compensate. Indoors "
+                        "AE settles near 33000 (1/30 s), which smears anything moving")
+    p.add_argument("--hfov", type=float, default=66.0,
+                   help="lens horizontal field of view in degrees, for the distance advice. "
+                        "66 is the Camera Module 3 standard lens, the wide variant is 102")
+    p.add_argument("--object-mm", type=float, default=40.0,
+                   help="length of the fastener you are actually holding, for the same advice")
     p.add_argument("--out", default="runs/camera_hailo", help="annotated frames and timings land here")
     p.add_argument("--save-every", type=int, default=50, help="0 to save nothing")
     args = p.parse_args()
@@ -98,6 +161,7 @@ def main():
     print(f"hef      {args.hef}")
     print(f"input    {in_info.name} {in_info.shape}")
 
+    from libcamera import controls
     from picamera2 import Picamera2
 
     picam = Picamera2()
@@ -111,6 +175,23 @@ def main():
     picam.configure(picam.create_video_configuration(
         main={"size": (args.width, args.height), "format": "RGB888"}, raw={"size": sensor}))
     picam.start()
+
+    # Focus, because nothing set it before. AfMode's libcamera default is Manual and
+    # LensPosition's is 1.0 dioptre, so the lens sat at 1 m no matter where the object
+    # was -- a fastener at arm's length was simply never in focus, and defocus costs
+    # exactly the fine detail a 50 px object is made of. AfRange is Full rather than
+    # Macro because the working distance is the thing being measured here.
+    if args.focus is None:
+        picam.set_controls({"AfMode": controls.AfModeEnum.Continuous,
+                            "AfRange": controls.AfRangeEnum.Full})
+    else:
+        picam.set_controls({"AfMode": controls.AfModeEnum.Manual,
+                            "LensPosition": 1.0 / args.focus})
+    # Manual *exposure time* only: gain stays on auto, so capping the shutter against
+    # motion blur costs brightness the AGC then puts back.
+    if args.shutter:
+        picam.set_controls({"ExposureTimeMode": controls.ExposureTimeModeEnum.Manual,
+                            "ExposureTime": args.shutter})
 
     # Small objects are lost to downscaling, not to the model. The frame is
     # letterboxed from --width down to --imgsz, and FOD-A's median object spans
@@ -137,7 +218,7 @@ def main():
     # Cropping magnifies, so it divides: at zoom 0.5 an object covers twice the
     # frame pixels it did at full field of view, and reaches the model twice as big.
     effective = args.imgsz / args.width / args.zoom
-    need = round(0.111 * args.width * args.zoom)
+    need = round(TRAIN_SCALE * args.width * args.zoom)
     print(f"camera   {args.width}x{args.height} from a {sensor[0]}x{sensor[1]} readout, zoom {args.zoom:g}")
     print(f"scale    an object spanning N px at full FOV reaches the model as {effective:.2f}N px")
     print(f"         to match the ~53 px training median it must span ~{need} px of this frame")
@@ -150,6 +231,28 @@ def main():
               f"\n         Cosmetic only: the model still gets real detail.")
     else:
         print(" -- no upscaling anywhere.")
+
+    # The working distance is a tape-measure question no flag can answer, but the lens
+    # answers it for free: LensPosition is dioptres, so its reciprocal is where the
+    # camera is actually focused. Turn that into the two numbers worth acting on --
+    # the object length that is at training scale here, and the zoom that would put
+    # the object you are actually holding there.
+    k = scale_constant(args.hfov)
+    distance, fom = focus_state(picam)
+    mode = "manual" if args.focus else "continuous autofocus"
+    print(f"focus    {mode}, lens at {fmt_m(distance)}, FocusFoM {fom}")
+    if math.isinf(distance):
+        print("         focused at infinity -- nothing near the camera is sharp")
+    else:
+        at_scale_mm = k * distance * args.zoom * 1000
+        want_zoom = args.object_mm / (k * distance * 1000)
+        print(f"         at this distance a ~{at_scale_mm:.0f} mm object is at training scale; "
+              f"for {args.object_mm:.0f} mm")
+        if want_zoom > 1.0:
+            print(f"         move in to {args.object_mm / (k * 1000):.2f} m (zoom cannot exceed 1.0)")
+        else:
+            print(f"         use --zoom {want_zoom:.2f}, or hold it at "
+                  f"{args.object_mm / (k * args.zoom * 1000):.2f} m at this zoom")
     print()
 
     stages = {k: [] for k in ("capture", "preprocess", "infer", "postprocess", "total")}
@@ -209,16 +312,27 @@ def main():
                             print(f"  frame {i:4d}  {len(boxes)} detection(s)  -> frame_{i:04d}.jpg")
                         if args.preview:
                             # off the real frame, since 90/270 swaps width and height
-                            need = round(0.111 * shot.shape[1] * args.zoom)
+                            need = round(TRAIN_SCALE * shot.shape[1] * args.zoom)
                             sharp = "soft" if real_px(args.zoom) < args.width else "sharp"
                             if real_px(args.zoom) < args.imgsz:
                                 sharp = "INTERPOLATED"
+                            # capture_metadata() waits for the next frame, so refreshing it
+                            # every frame would halve the rate. Focus drifts far slower than
+                            # 0.35 s, and this only runs with a human watching the window.
+                            if i % 15 == 0:
+                                distance, fom = focus_state(picam)
                             hud = (f"{1000 / max((t4 - t0) * 1000, 1e-6):.1f} FPS | infer {(t3 - t2) * 1000:.1f} ms | "
                                    f"{len(boxes)} det | conf>={args.conf:.2f} | zoom {args.zoom:.2f} "
                                    f"(need ~{need}px, {sharp})")
-                            cv2.putText(shot, hud, (10, shot.shape[0] - 34),
+                            focus_hud = (f"focus {fmt_m(distance)} (FoM {fom}) | at training scale here: "
+                                         f"~{k * distance * args.zoom * 1000:.0f} mm object"
+                                         if not math.isinf(distance) else
+                                         f"focus infinity (FoM {fom}) -- nothing near is sharp")
+                            cv2.putText(shot, hud, (10, shot.shape[0] - 56),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-                            cv2.putText(shot, f"q quit | +/- zoom | [ ] confidence | r rotate ({args.rotate})",
+                            cv2.putText(shot, focus_hud, (10, shot.shape[0] - 34),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+                            cv2.putText(shot, f"q quit | +/- zoom | [ ] confidence | r rotate ({args.rotate}) | f refocus",
                                         (10, shot.shape[0] - 12),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
                             cv2.imshow("FOD detection - Hailo-8", shot)
@@ -237,6 +351,12 @@ def main():
                                 args.conf = max(0.05, round(args.conf - 0.05, 2))
                             elif key == ord("]"):
                                 args.conf = min(0.95, round(args.conf + 0.05, 2))
+                            elif key == ord("f"):
+                                # A one-shot sweep, then hold. Continuous AF hunts when the
+                                # scene is a flat floor with one small object on it, and a
+                                # hunting lens is indistinguishable from the defocus bug.
+                                picam.set_controls({"AfMode": controls.AfModeEnum.Auto})
+                                picam.autofocus_cycle()
 
     picam.stop()
     if args.preview:
