@@ -19,7 +19,7 @@ layer to write. Two kinds also means a plain isinstance dispatch beats any
 registry-of-handlers indirection.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from fodcv.paths import CURRENT_DATASET
@@ -101,6 +101,23 @@ SOURCES: dict[str, VocSource | YoloSource] = {
     #     val_fraction=0.15,
     # ),
 }
+
+
+# The same FOD-A source with the smoke-test cap lifted. `subset_size=600` was a
+# deliberate scope decision -- FOD-A is a pretraining prior, and PRD §10 puts the
+# real training on ~2000-2500 self-collected arena images -- but 600 images is
+# 6% of the 9,623 FOD-A carries a mapped box for, and it starves the rare classes
+# worst: 14 screw instances used of 157 available, 85 nails of 1,193. Live
+# detection then fails on exactly nail and screw.
+#
+# A second id rather than an edit to `fod-a`, because preparing a dataset rebuilds
+# its directory and reshuffles which images land in val -- every mAP already
+# recorded is against fod-a's 90-image split, and those stay comparable only while
+# that split stays put.
+#
+# 3000 is the intermediate step: ~2.3 h on MPS against ~7.5 h for all 9,623, which
+# is enough to see whether the curve moves before committing a night to it.
+SOURCES["fod-a-3k"] = replace(SOURCES["fod-a"], subset_size=3000)
 
 
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:
