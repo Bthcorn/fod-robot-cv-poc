@@ -373,6 +373,35 @@ Cropping cannot rescue this. Cropped so a real screw fills 50% and then 83% of t
 
 So the fix is data, not optics. In cost order: drop `subset_size=600`; admit background images with empty labels; reconsider `unknown` (53% of the data, four unrelated shapes, and PRD FR-3 specifies a single `metal_fastener` class anyway); then the arena dataset, which is the real answer. Note `--angle-aug` (`ANGLE_AUG_HYP`) was written for the grazing-angle geometry and **has still never been run**. Worth pairing with any retrain — and note `runs/train_poc/results.csv` peaks at epoch 5 and ends at recall 0.408, so 510 images overfit inside five epochs. More data beats more epochs.
 
+### Stage H — FOD-A is 9,623 images and about 38 scenes
+
+Lifting `subset_size=600` looked like a 16× data win: FOD-A carries a mapped box on **9,623** of its 33,793 images against the 600 in use. It is not, and the reason invalidates any random-split mAP measured on it.
+
+**Adjacent frames are near-identical.** Mean pixel similarity by frame gap, 120 sampled pairs each:
+
+| pair | mean similarity | fraction > 0.95 |
+|---|---:|---:|
+| adjacent (+1) | 0.975 | **87%** |
+| +2 | 0.973 | 91% |
+| +10 | 0.949 | 68% |
+| +100 | 0.910 | 34% |
+| random | 0.778 | 3% |
+
+FOD-A is video-derived. Chaining consecutive candidates while similarity stays above 0.95 gives **38 runs covering 96% of the images, with half of everything in the largest 6** (1005, 977, 870, 807, 741, 514 frames). Going 600 → 3,000 images buys 5× more *frames of the same handful of sessions*, not 5× more diversity. `subset_size=600`'s own comment — FOD-A is a pretraining prior, real training goes on PRD §10's self-collected set — was the correct read, and this table is why.
+
+**Which breaks the split.** `split()` is a per-image shuffle, so near-duplicates land on both sides:
+
+| dataset | val frames with a train neighbour within ±2 |
+|---|---|
+| fod-a (600) | 12/90 — **13%** |
+| fod-a-3k (3000) | 334/450 — **74%** |
+
+A model trained on `fod-a-3k` reaches **mAP50 0.948 / mAP50-95 0.621 by epoch 7**, against `poc-v1`'s best-ever 0.785 / 0.479. That number is not a generalization result and must not be quoted as one — three-quarters of its val set is near-identical to something it trained on. The `fod-a` 0.725 baseline is mildly optimistic for the same reason at 13%.
+
+**And there is no clean holdout left inside FOD-A.** Of the 6,623 candidates untouched by `fod-a-3k`, **zero** sit even 30 frames from a training frame. Once 2,550 frames are drawn from 38 sessions, the sessions are all contaminated. A trustworthy FOD-A number needs the split grouped by scene *before* training — which is exactly the warning already standing at `research/datasets.py:84-96`, arriving from the pretraining set rather than from the arena data it was written about.
+
+Two consequences. Any FOD-A mAP in this README is a *relative* figure for ranking runtimes, which is what it was always used for and where redundancy cancels out; it is not an absolute accuracy claim. And the honest evaluation of a fastener detector here is the live camera, which no amount of FOD-A redundancy can contaminate.
+
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 
 mAP does not depend on the host, so the AC-2 accuracy half was measurable on the Mac without waiting for the board. Full matrix, `best.pt`, 90 val images, imgsz 640:

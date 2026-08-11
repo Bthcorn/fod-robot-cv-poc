@@ -27,3 +27,5 @@ artifacts/
 
 .env
 .mcp.json
+data/fod-a-scenes.json
+train_3k.log
