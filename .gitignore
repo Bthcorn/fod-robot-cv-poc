@@ -29,3 +29,4 @@ artifacts/
 .mcp.json
 data/fod-a-scenes.json
 train_3k.log
+hailo_compile_v2.log

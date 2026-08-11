@@ -124,7 +124,7 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
 
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
-        precisions=None, imgsz=IMGSZ, force=False):
+        precisions=None, imgsz=IMGSZ, force=False, conf=None):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -159,12 +159,19 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                     if fmt == "litert":
                         path = export_litert(weights, imgsz, quantize, calib)
                     else:
+                        # `conf` overrides only where the format already declares one --
+                        # hailo, whose NMS threshold is compiled into the .hef and cannot
+                        # be lowered at inference time. Every other backend takes conf= at
+                        # call time and must not have one baked in here.
+                        extra = dict(FMT_EXTRA_ARGS.get(fmt, {}))
+                        if conf is not None and "conf" in extra:
+                            extra["conf"] = conf
                         path = YOLO(str(weights)).export(
                             format=fmt,
                             imgsz=imgsz,
                             quantize=quantize,
                             data=str(calib) if takes_calibration(fmt, quantize) else None,
-                            **FMT_EXTRA_ARGS.get(fmt, {}),
+                            **extra,
                         )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that can't be loaded back is not an export.

@@ -402,6 +402,27 @@ A model trained on `fod-a-3k` reaches **mAP50 0.948 / mAP50-95 0.621 by epoch 7*
 
 Two consequences. Any FOD-A mAP in this README is a *relative* figure for ranking runtimes, which is what it was always used for and where redundancy cancels out; it is not an absolute accuracy claim. And the honest evaluation of a fastener detector here is the live camera, which no amount of FOD-A redundancy can contaminate.
 
+**A leak-free comparison is still possible, and it is worth having.** 263 images survive from 250 scenes that contributed no training frame to either run. Verified by pixels rather than by filename arithmetic: their similarity to the nearest training image peaks at 0.969 and **none exceed 0.97**, against 0.975 mean for true adjacent frames. Scored at imgsz 480, the deployment size:
+
+| | poc-v1 (510 img) | poc-v2 / fod-a-3k (2550 img) |
+|---|---:|---:|
+| mAP50 | 0.675 | **0.995** |
+| mAP50-95 | 0.430 | **0.842** |
+| screw mAP50 | 0.671 | 0.995 |
+| **screw recall** | **0.433** | **1.000** |
+| bolt mAP50 | 0.385 | 0.995 |
+| unknown mAP50 | 0.969 | 0.995 |
+
+The set carries 47 screw, 210 unknown, 6 bolt and **no nail** — nails live almost entirely in the long scenes both runs sampled — so it settles screw and says little about nail. Screw recall 0.433 → 1.000 is the real gain, and it is the class the camera failed on.
+
+### FOD-A is single-object-on-blank-surface photography
+
+The 0.995 is real and also nearly meaningless, and one look at the images says why. FOD-A is **one fastener, centred on a uniform concrete slab or sand**. Consecutive frames are the same object nudged between shots; different scenes are different objects on the *same* backgrounds. There is no clutter in it, no second object, no furniture, no structure — every one of the 510/2550 training images holds exactly one object (`min 1 / max 1 / mean 1.00`), because `_prepare_voc` keeps an image only `if boxes`.
+
+So the task FOD-A poses is "find the single high-contrast object on an empty plane", and 2,550 examples saturate it. That is the whole explanation for Stage G's out-of-distribution result: pointed at a desk, a model trained only on blank planes has no other behaviour available than to draw a full-frame box and call it `unknown`. It is not a threshold problem and not a calibration problem — the model has never been shown a scene.
+
+Which settles the roadmap. More FOD-A improves fastener *shape* recognition, and Stage H's screw recall proves it does. It cannot fix false positives on furniture, because FOD-A contains no furniture and cannot supply a single cluttered negative. **PRD §10's own-image collection is not the eventual refinement, it is the only fix**, and the background-image argument above matters more than the class-balance one: what is missing is not more fasteners, it is scenes.
+
 ### INT8 accuracy is already settled — and it is bad news for FR-1
 
 mAP does not depend on the host, so the AC-2 accuracy half was measurable on the Mac without waiting for the board. Full matrix, `best.pt`, 90 val images, imgsz 640:

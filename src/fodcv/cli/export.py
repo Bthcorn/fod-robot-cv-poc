@@ -17,6 +17,13 @@ def main():
     parser.add_argument("--precisions", nargs="+", default=DEFAULT_PRECISIONS, choices=list(PRECISIONS))
     parser.add_argument("--imgsz", type=int, default=IMGSZ)
     parser.add_argument("--force", action="store_true", help="re-export artifacts already in the manifest")
+    parser.add_argument("--conf", type=float, default=None,
+                        help="NMS score threshold to COMPILE INTO the hailo .hef. Ignored by every "
+                             "other format, which take conf= at call time. Defaults to the matrix's "
+                             "0.001, which exists so the benchmark row keeps its low-confidence tail "
+                             "and stays comparable to the host-NMS backends. A deploy .hef wants "
+                             "something usable -- 0.10 to 0.25 -- because on the Pi the compiled "
+                             "value is a floor that --conf can only filter above")
     args = parser.parse_args()
 
     export.run(
@@ -27,6 +34,7 @@ def main():
         precisions=args.precisions,
         imgsz=args.imgsz,
         force=args.force,
+        conf=args.conf,
     )
 
 

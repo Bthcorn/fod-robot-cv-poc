@@ -66,4 +66,12 @@ python -c "import hailo_sdk_client, tensorflow, numpy; print('DFC ok', numpy.__v
 # FMT_EXTRA_ARGS in src/fodcv/matrix.py passes name=hailo8. Without it Ultralytics
 # defaults to hailo8l, the 13-TOPS part, and the .hef will not load on a Hailo-8.
 # Verify on the Pi with: hailortcli parse-hef <best.hef>
-fodcv-export --run poc-v1-480 --imgsz 480 --formats hailo --precisions int8
+# Parametrised through the environment, because `bash -s` gets the script on stdin
+# and cannot also take positional arguments. Pass them on the docker run line:
+#   -e HEF_RUN=poc-v2-480 -e HEF_CONF=0.10
+fodcv-export \
+  --run "${HEF_RUN:-poc-v1-480}" \
+  --dataset "${HEF_DATASET:-fod-a}" \
+  --imgsz "${HEF_IMGSZ:-480}" \
+  --conf "${HEF_CONF:-0.001}" \
+  --formats hailo --precisions int8
