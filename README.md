@@ -2,6 +2,24 @@
 
 De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot PRD v2`) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
 
+## Where it stands
+
+Presentation write-up of the detection findings: <https://claude.ai/code/artifact/13e844c6-aade-4838-a576-68098c91250e>
+
+| | Result | Where |
+|---|---|---|
+| Throughput on Hailo-8 | **17.96 ms / 55.7 FPS** @480, 51.8 FPS sustained over 600 s | Stage F |
+| Fastest CPU runtime | 44.4 ms (NCNN FP16) — Hailo is 2.47× faster, 3.21× on two cores | Stage F |
+| End-to-end with camera | **30 FPS**, capture-bound; inference is 10 ms of 33 | Stage G |
+| Live detection of real fasteners | was near-zero — **three causes, one a bug** | Stage G |
+| Accuracy, scene-disjoint split | **mAP50 0.675 → 0.995**, screw recall **0.433 → 1.000** | Stage H |
+| Median confidence | **0.534 → 0.936** | Stage H |
+| Blocking limitation | FOD-A is ~38 scenes of one object on blank concrete | Stage H |
+
+**The short version.** The `.hef` was never the problem and neither was the optics. Three things were: the camera's lens was parked at 1.00 m because nothing ever set `AfMode` (libcamera's default is Manual); the training set was capped at 600 images and contained **ten screws**; and FOD-A contains no cluttered scenes at all, so the model cannot abstain and answers `unknown` on furniture. Focus is fixed and costs nothing (33.38 ms against a 33.30 ms baseline). Lifting the cap to 3,000 images fixed the confidence. The third is not fixable from FOD-A — **PRD §10's own-image collection is now the critical path, not an eventual refinement.**
+
+Two numbers must not be quoted: `fod-a-3k`'s own val mAP (0.948 — its split is 74% near-duplicates), and any FOD-A mAP as an absolute accuracy claim. Stage H explains both.
+
 ## Layout
 
 ```
