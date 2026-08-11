@@ -20,6 +20,12 @@ Default HEF is the conf=0.25 build. The benchmark HEF is compiled at conf=0.001
 so its mAP is comparable to the host-NMS backends, and pointed at a camera it
 emits ~100 junk boxes a frame -- a black test frame alone produced 50.
 
+`unknown` is not reported by default. It is 53% of the training data and a
+grab-bag of Washer/Nut/BoltWasher/BoltNutSet, so it is what fires on anything
+out of distribution -- full-frame boxes over a mouse or a keyboard. --classes
+puts it back, and `u` toggles it live, which is the fastest way to tell "the
+model never saw this" from "the model found it and got the name wrong".
+
 Focus is set here, and was not before. libcamera defaults AfMode to Manual and
 LensPosition to 1.0 dioptre, so every frame this script ever captured was focused
 at 1 m regardless of where the fastener was -- and a defocused 50 px screw is
@@ -136,6 +142,14 @@ def main():
                    help="sensor readout width. ScalerCrop indexes the full 4608px array, so a binned "
                         "readout has no real pixels to give a tight crop and the result is upscaled "
                         "mush. 2304 sustains 56fps; 4608 is sharpest but caps the sensor at 14.3fps")
+    p.add_argument("--classes", nargs="*", default=["nail", "screw", "bolt"], choices=CLASSES,
+                   metavar="NAME",
+                   help="which classes to report. `unknown` is off by default: it is 53%% of the "
+                        "training data and a grab-bag of Washer/Nut/BoltWasher/BoltNutSet, so it "
+                        "is the class that fires on anything unfamiliar -- full-frame boxes over "
+                        "a mouse or a keyboard. Pass it explicitly to see them again, which is "
+                        "worth doing when diagnosing, since an `unknown` box on a real fastener "
+                        "means the model found it and only got the name wrong")
     p.add_argument("--focus", type=focus_arg, default=None, metavar="AUTO|METRES",
                    help="'auto' (the default) runs continuous autofocus over the full range; "
                         "a number locks the lens at that subject distance. Nothing set this "
@@ -156,10 +170,17 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # A reporting filter, not a model change: NMS is compiled into the .hef, so the
+    # chip still scores all four classes and costs the same either way. Dropping the
+    # class here only stops it being drawn, counted and saved.
+    shown = {CLASSES.index(name) for name in args.classes}
+
     hef = HEF(args.hef)
     in_info = hef.get_input_vstream_infos()[0]
     print(f"hef      {args.hef}")
     print(f"input    {in_info.name} {in_info.shape}")
+    print(f"classes  reporting {', '.join(args.classes) or 'nothing'}"
+          + ("" if "unknown" in args.classes else "  (unknown suppressed)"))
 
     from libcamera import controls
     from picamera2 import Picamera2
@@ -286,6 +307,8 @@ def main():
 
                     boxes = []
                     for class_id, per_class in enumerate(list(result.values())[0][0]):
+                        if class_id not in shown:
+                            continue
                         for row in np.asarray(per_class):
                             if row[4] >= args.conf:
                                 boxes.append((to_frame_coords(row, inverse, args.imgsz, bgr.shape),
@@ -332,7 +355,9 @@ def main():
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
                             cv2.putText(shot, focus_hud, (10, shot.shape[0] - 34),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-                            cv2.putText(shot, f"q quit | +/- zoom | [ ] confidence | r rotate ({args.rotate}) | f refocus",
+                            unknown_state = "on" if CLASSES.index("unknown") in shown else "off"
+                            cv2.putText(shot, f"q quit | +/- zoom | [ ] conf | r rotate ({args.rotate}) | "
+                                              f"f refocus | u unknown ({unknown_state})",
                                         (10, shot.shape[0] - 12),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
                             cv2.imshow("FOD detection - Hailo-8", shot)
@@ -351,6 +376,12 @@ def main():
                                 args.conf = max(0.05, round(args.conf - 0.05, 2))
                             elif key == ord("]"):
                                 args.conf = min(0.95, round(args.conf + 0.05, 2))
+                            elif key == ord("u"):
+                                # Toggling beats restarting for the one question that matters
+                                # when a fastener is not detected: an `unknown` box sitting on
+                                # it means the model found the object and only got the name
+                                # wrong, which is a training-data answer, not a camera one.
+                                shown ^= {CLASSES.index("unknown")}
                             elif key == ord("f"):
                                 # A one-shot sweep, then hold. Continuous AF hunts when the
                                 # scene is a flat floor with one small object on it, and a
