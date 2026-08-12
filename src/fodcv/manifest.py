@@ -1,24 +1,19 @@
-"""exports.json -- the handover between the Mac that builds artifacts and the Pi
+"""exports.json -- the handover from the Mac that builds artifacts to the Pi
 that measures them.
 
-One cell per `{format}:{precision}` key. A cell holds either a path to a usable
-artifact, or a sentinel explaining why there isn't one:
+One cell per `{format}:{precision}` key, holding either an artifact path or a
+sentinel explaining why there isn't one:
 
     "onnx:int8":   "bench_int8.onnx"
     "ncnn:int8":   "UNSUPPORTED: ncnn has no int8 export path"
     "litert:int8": "FAILED: RuntimeError: ..."
 
-Paths are stored **relative to this file**, which is what makes the run
-directory relocatable. They used to be absolute Mac paths, so after an rsync the
-Pi's `Path(entry).exists()` was false for every cell unless its checkout sat at
-the identical absolute path -- and each miss fell through to a local export,
-which on aarch64 cannot build LiteRT at all. The failure was silent: the
-benchmark just reported different numbers.
-
-Both sides used to hand-parse this format, and they disagreed: the exporter's
-resume check filtered only FAILED while every other site filtered FAILED and
-UNSUPPORTED, so an UNSUPPORTED cell read as "already built". One `built()` here
-is the whole guard.
+Two traps this module exists to close:
+  - Paths are stored **relative to this file**, or the run directory stops
+    surviving an rsync and every cell silently falls back to a local export.
+  - `built()` is the only place a cell is judged usable. Sites that re-derive
+    it drift -- filtering FAILED but not UNSUPPORTED reads a skipped cell as
+    already built.
 """
 
 import json
@@ -37,8 +32,7 @@ def key(fmt: str, label: str) -> str:
 def is_sentinel(entry: str) -> bool:
     """Is this cell an explanation rather than an artifact path?
 
-    The one place the sentinel prefix is matched. migrate_artifacts used to
-    re-derive it, which is how the two sides came to disagree in the first place.
+    The one place the sentinel prefix is matched. Do not re-derive it elsewhere.
     """
     return entry.startswith(_SENTINELS)
 
@@ -48,11 +42,8 @@ def load(manifest_path) -> dict:
 
 
 def save(manifest_path, manifest: dict):
-    """Write the whole manifest.
-
-    Callers save per cell rather than once at the end: a 30-minute export run
-    that dies on the last format must not lose the artifacts it already built.
-    """
+    """Write the whole manifest. Callers save per cell, not once at the end, so
+    a 30-minute export that dies late keeps what it already built."""
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
@@ -68,8 +59,8 @@ def built(manifest: dict, manifest_path, fmt: str, label: str):
 def entry_for(artifact_path, manifest_path) -> str:
     """How an artifact is written into the manifest: relative to the manifest.
 
-    Falls back to an absolute path if the artifact somehow lands outside the run
-    directory -- better a path that works only here than a silently broken one.
+    Absolute fallback if it lands outside the run directory -- better a path
+    that works only here than a silently broken one.
     """
     artifact, manifest_dir = Path(artifact_path).resolve(), Path(manifest_path).parent.resolve()
     try:

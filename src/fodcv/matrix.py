@@ -1,15 +1,11 @@
 """The benchmark matrix: which formats, which precisions, and what each supports.
 
-One definition, shared by the exporter that builds the cells and the benchmark
-that measures them. They used to hold byte-identical copies of all of this,
-kept in step by a comment ("keep in step with export.py") rather than by code --
-and a cell whose two sides disagree has no artifact to reuse, so it silently
-falls back to exporting locally and measures a different file.
+One definition, shared by exporter and benchmark. If the two ever disagree on a
+cell, the Pi finds no artifact to reuse and silently measures a local re-export.
 
-Precision support is per-format and read from Ultralytics' own tables, so this
-tracks the library instead of a hand-kept list. Note NCNN is absent from
-INT8_FORMATS as of 8.4.115 -- FP16 is its only quantized path, despite the PRD
-appendix listing "NCNN INT8".
+Precision support is read from Ultralytics' own tables rather than hand-kept.
+Note NCNN is absent from INT8_FORMATS as of 8.4.115 -- FP16 is its only
+quantized path, despite the PRD appendix listing "NCNN INT8".
 """
 
 import shutil
@@ -22,35 +18,27 @@ from ultralytics.engine.exporter import (
     export_formats,
 )
 
-# Which formats accept a calibration `data=` argument at all. MNN is in
-# INT8_FORMATS but quantizes without calibration data and hard-errors if you
-# pass one, so INT8 support and calibration support are not the same question.
+# INT8 support and calibration support are different questions: MNN is in
+# INT8_FORMATS but hard-errors if passed `data=`.
 FMT_ARGS = dict(zip(export_formats()["Argument"], export_formats()["Arguments"]))
 FMT_SUFFIX = dict(zip(export_formats()["Argument"], export_formats()["Suffix"]))
 
 FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn", "hailo"]
 
-# Per-format export arguments that are a property of *our* hardware, not a
-# default Ultralytics could pick for us. Splatted into export() the same way
-# takes_calibration() gates `data=`.
+# Export arguments that are a property of *our* hardware, not defaults
+# Ultralytics could pick. Splatted into export().
 FMT_EXTRA_ARGS = {
-    # The board is a Hailo-8 (26 TOPS). Ultralytics defaults to hailo8l (13
-    # TOPS) when `name` is unset, which compiles a .hef for the wrong part.
-    #
-    # conf: hailo bakes NMS into the .hef, so the score threshold is compiled in
-    # and cannot be lowered at inference time (exporter.py writes `conf or 0.25`
-    # into nms_config.json). Every other backend runs NMS on the host, where
-    # model.val() drops the threshold to 0.001 to trace the full PR curve. Left
-    # at 0.25 the hailo row would lose its low-confidence tail and report a
-    # smaller mAP than the same weights earn elsewhere -- a threshold artifact
-    # read as a quantization loss, against a 0.70 accuracy gate. Match val.
-    # A deployment .hef would set this back up; it only costs boxes NMS discards.
+    # name: the board is a Hailo-8 (26 TOPS). Unset, Ultralytics defaults to
+    # hailo8l (13 TOPS) and compiles a .hef for the wrong part.
+    # conf: hailo bakes NMS into the .hef, so this threshold cannot be lowered at
+    # inference time. Match model.val()'s 0.001 or the hailo row loses its
+    # low-confidence tail and reads as a quantization loss. A deploy .hef wants
+    # it back up -- see fodcv-export --conf.
     "hailo": {"name": "hailo8", "conf": 0.001},
 }
 PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
-# fp16 is off by default: Ultralytics only encodes INT8 in output filenames, and
-# an FP16 ONNX export is a silent no-op on a CPU device anyway. It stays
-# selectable for NCNN, where FP16 is the only quantized path there is.
+# fp16 off by default: a silent no-op on CPU. Stays selectable for NCNN, its
+# only quantized path.
 DEFAULT_PRECISIONS = ["fp32", "int8"]
 IMGSZ = 640
 
@@ -60,9 +48,8 @@ def supported(fmt: str, quantize) -> bool:
         return fmt in INT8_FORMATS
     if quantize == 16:
         return fmt in FP16_FORMATS
-    # An unset/32 request is FP32, which is universal *except* for the INT8-only
-    # accelerator backends. Without this the UNSUPPORTED sentinel never gets set
-    # for them, so the cell is re-attempted and re-failed on every export run.
+    # FP32 is universal except on the INT8-only accelerator backends. Without
+    # this they never get an UNSUPPORTED sentinel and re-fail every export run.
     return fmt not in FP32_UNSUPPORTED_FORMATS
 
 
@@ -79,25 +66,17 @@ def takes_calibration(fmt: str, quantize) -> bool:
 def claim_artifact(path: str, fmt: str, label: str) -> str:
     """Move a fresh export to a name Ultralytics will never emit or overwrite.
 
-    ponytail: the whole matrix has to coexist on disk, and Ultralytics' output
-    names collide three different ways. FP16 and FP32 both write `best.onnx` /
-    `best_openvino_model/`. An ONNX INT8 export *consumes* `best.onnx` to make
-    `best_int8.onnx`. And a LiteRT export drops several `.tflite` variants into
-    the directory at once, so a later FP32 run silently overwrote a genuinely
-    quantized `best_int8.tflite` with a float one -- caught only by inspecting
-    tensor dtypes. Renaming just the returned path is not enough; the fix is a
-    `bench_` prefix, outside the namespace Ultralytics writes into.
+    ponytail: the whole matrix must coexist on disk, and Ultralytics' output
+    names collide three ways -- FP16/FP32 share `best.onnx`, an ONNX INT8 export
+    consumes `best.onnx`, and LiteRT drops several `.tflite` variants at once.
+    The `bench_` prefix puts artifacts outside the namespace it writes into.
 
-    Safe because AutoBackend._model_type() substring-matches the format suffix,
-    so `bench_fp32.onnx` and `bench_fp32_ncnn_model` still load.
-
-    Lives here, not in research/export.py, because the Pi's fallback export has
-    to go through it too -- that path skipped the claim and reintroduced exactly
-    the collision this function exists to prevent.
+    Every export path must go through this, the Pi's fallback included, or the
+    collision comes straight back. See check_quantized for the size backstop.
     """
     p = Path(path)
-    # Keep Ultralytics' official suffix -- AutoBackend detects the format by
-    # substring, so dropping `_ncnn_model` / `_openvino_model` would break loading.
+    # Keep Ultralytics' official suffix: AutoBackend detects format by substring,
+    # so dropping `_ncnn_model` / `_openvino_model` breaks loading.
     claimed = p.with_name(f"bench_{label}{FMT_SUFFIX[fmt]}")
     if claimed.exists():
         shutil.rmtree(claimed) if claimed.is_dir() else claimed.unlink()

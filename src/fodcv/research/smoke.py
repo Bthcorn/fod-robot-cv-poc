@@ -1,11 +1,11 @@
-"""Smoke test: does the install actually work end to end, before training?
+"""Smoke test: does the install work end to end, before training?
 
-Loads stock (COCO-pretrained) yolo11n and runs it on a few images from the
-prepared dataset. It won't recognize fasteners (wrong classes) -- this only
-proves the library, weights download, and inference call all work here.
+Runs stock COCO-pretrained yolo11n on a few prepared-dataset images. It will
+not recognize fasteners -- wrong classes -- this only proves the library,
+weights download and inference call all work here.
 
-Reads the prepared dataset rather than a raw VOC extract, so it works for any
-registered dataset, including YOLO sources that were never VOC to begin with.
+Reads the prepared dataset, not a raw VOC extract, so it works for any
+registered source.
 """
 
 from ultralytics import YOLO
