@@ -1,0 +1,19 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a-3k,ncnn,fp32,4,reused,43.275,44.292,23.108,2.866,39.021,1.005,10.48,0.995,0.856,65.5,68.8,throttled=0x0,4.35,ok
+best.pt,fod-a-3k,ncnn,fp16,4,reused,43.944,44.309,22.756,2.697,39.895,1.023,5.33,0.995,0.856,65.0,70.5,throttled=0x0,4.07,ok
+best.pt,fod-a-3k,ncnn,int8,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,n/a,n/a,3.85,SKIPPED: Ultralytics has no int8 export path for ncnn
+best.pt,fod-a-3k,litert,fp32,4,reused,76.65,77.12,13.046,2.969,72.286,1.023,10.585,0.995,0.856,64.5,72.2,throttled=0x0,3.84,ok
+best.pt,fod-a-3k,litert,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,n/a,n/a,4.01,SKIPPED: Ultralytics has no fp16 export path for litert
+best.pt,fod-a-3k,litert,int8,4,reused,23.363,23.854,42.802,2.71,19.32,0.999,3.031,0.963,0.732,65.5,68.8,throttled=0x0,4.08,ok
+best.pt,fod-a-3k,mnn,fp32,4,reused,56.816,57.458,17.601,2.676,52.784,1.023,10.447,0.995,0.856,65.5,71.6,throttled=0x0,4.03,ok
+best.pt,fod-a-3k,mnn,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,66.7,throttled=0x0,4.1,FAILED: ModuleNotFoundError: No module named 'onnx'
+best.pt,fod-a-3k,mnn,int8,4,reused,57.392,57.62,17.424,2.639,53.367,1.035,2.813,0.995,0.847,65.5,71.0,throttled=0x0,4.06,ok
+best.pt,fod-a-3k,onnx,fp32,4,reused,87.996,91.372,11.364,3.865,81.576,1.592,10.533,0.995,0.856,65.0,74.3,throttled=0x80000,4.03,ok
+best.pt,fod-a-3k,onnx,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,66.1,throttled=0x80000,4.06,FAILED: ModuleNotFoundError: No module named 'onnx'
+best.pt,fod-a-3k,onnx,int8,4,reused,87.3,90.791,11.455,3.769,81.094,1.294,2.991,0.995,0.805,65.5,72.7,throttled=0x80000,4.04,ok
+best.pt,fod-a-3k,openvino,fp32,4,reused,63.437,64.074,15.764,2.687,59.329,1.032,10.697,0.995,0.856,65.5,72.7,throttled=0x80000,3.81,ok
+best.pt,fod-a-3k,openvino,fp16,4,reused,62.902,63.645,15.898,2.741,58.79,1.018,5.61,0.995,0.856,65.5,73.8,throttled=0x80000,3.93,ok
+best.pt,fod-a-3k,openvino,int8,4,reused,167.198,167.809,5.981,2.742,162.971,1.018,3.342,0.995,0.83,65.5,74.3,throttled=0x80000,3.84,ok
+best.pt,fod-a-3k,hailo,fp32,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,n/a,n/a,3.83,SKIPPED: Ultralytics has no fp32 export path for hailo
+best.pt,fod-a-3k,hailo,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,n/a,n/a,4.02,SKIPPED: Ultralytics has no fp16 export path for hailo
+best.pt,fod-a-3k,hailo,int8,4,reused,17.828,18.048,56.092,2.802,14.262,0.406,7.682,0.995,0.851,65.0,67.8,throttled=0x80000,3.89,ok

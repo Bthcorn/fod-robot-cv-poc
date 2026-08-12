@@ -1,5 +1,6 @@
 import pytest
 
+from fodcv import paths
 from fodcv.research import dataset
 from fodcv.research.datasets import source
 
@@ -83,6 +84,34 @@ def test_data_yaml_splits_are_overridable(tmp_path):
         tmp_path / "data.yaml", FOD_A.class_names, train="images/val", val="images/val"
     ).read_text()
     assert "train: images/val" in text
+
+
+def test_preparing_refuses_to_clobber_without_force(monkeypatch, tmp_path):
+    """Raises rather than asserts: `python -O` strips asserts, and this is the
+    only guard standing in front of an rmtree of a prepared dataset."""
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+    keep = paths.dataset_dir("fod-a") / "images" / "keep.jpg"
+    keep.parent.mkdir(parents=True)
+    keep.write_bytes(b"image")
+
+    with pytest.raises(FileExistsError, match="--force"):
+        dataset._claim_output("fod-a", force=False)
+    assert keep.exists()
+
+
+def test_force_clears_that_dataset_and_only_that_one(monkeypatch, tmp_path):
+    """The collision that made preparing a second dataset delete the first."""
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+    doomed = paths.dataset_dir("fod-a")
+    doomed.mkdir(parents=True)
+    (doomed / "old.txt").write_text("stale")
+    neighbour = paths.dataset_dir("arena-v1")
+    neighbour.mkdir(parents=True)
+    (neighbour / "keep.txt").write_text("mine")
+
+    assert dataset._claim_output("fod-a", force=True) == doomed
+    assert not doomed.exists()
+    assert (neighbour / "keep.txt").read_text() == "mine"
 
 
 def test_split_is_deterministic_for_a_seed():

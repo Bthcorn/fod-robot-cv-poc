@@ -1,0 +1,2 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a,hailo,int8,4,reused,19.812,22.124,50.475,3.022,15.829,0.367,7.582,n/a,n/a,65.5,66.1,throttled=0x0,5.34,ok

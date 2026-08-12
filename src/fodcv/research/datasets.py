@@ -19,7 +19,7 @@ layer to write. Two kinds also means a plain isinstance dispatch beats any
 registry-of-handlers indirection.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from fodcv.paths import CURRENT_DATASET
@@ -81,12 +81,43 @@ SOURCES: dict[str, VocSource | YoloSource] = {
     # recovered at evaluation time from the seeding log. So this is 1 class, not
     # the 4 the FOD-A comparison uses.
     #
+    # BEFORE REGISTERING THIS, read PRD §10 step 4: "Split 70/15/15, grouped so
+    # one scene never spans train and test; keep a cross-venue holdout from the
+    # machine-shop visit." None of that is implemented, and it does not apply to
+    # FOD-A -- §10 step 1 calls FOD-A a pretraining prior, not a test set, which
+    # is why `split()` is still a plain per-image shuffle into train/val:
+    #   - A *scene* is one difference-imaging camera lock (§10 step 3: lock the
+    #     camera, shoot bg, place fasteners, shoot fg), so a single scene spans
+    #     many near-identical images. Shuffling per image puts the same scene on
+    #     both sides of the split and inflates held-out mAP. Group first.
+    #   - There is no test split at all yet; val_fraction cuts train/val only.
+    #   - The cross-venue holdout is a collection decision (which shoot is held
+    #     out), not something a split fraction can express -- most likely its own
+    #     dataset-id rather than a slice of this one.
+    #
     # "arena-v1": YoloSource(
     #     source_dir=Path("~/Downloads/arena-export").expanduser(),
     #     class_names={0: "metal_fastener"},
     #     val_fraction=0.15,
     # ),
 }
+
+
+# The same FOD-A source with the smoke-test cap lifted. `subset_size=600` was a
+# deliberate scope decision -- FOD-A is a pretraining prior, and PRD §10 puts the
+# real training on ~2000-2500 self-collected arena images -- but 600 images is
+# 6% of the 9,623 FOD-A carries a mapped box for, and it starves the rare classes
+# worst: 14 screw instances used of 157 available, 85 nails of 1,193. Live
+# detection then fails on exactly nail and screw.
+#
+# A second id rather than an edit to `fod-a`, because preparing a dataset rebuilds
+# its directory and reshuffles which images land in val -- every mAP already
+# recorded is against fod-a's 90-image split, and those stay comparable only while
+# that split stays put.
+#
+# 3000 is the intermediate step: ~2.3 h on MPS against ~7.5 h for all 9,623, which
+# is enough to see whether the curve moves before committing a night to it.
+SOURCES["fod-a-3k"] = replace(SOURCES["fod-a"], subset_size=3000)
 
 
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:

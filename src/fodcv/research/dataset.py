@@ -86,10 +86,15 @@ def _claim_output(dataset: str, force: bool) -> Path:
     previous version opened the conversion with an unconditional rmtree of the
     single shared output directory, so preparing a second dataset destroyed the
     first without asking.
+
+    Raises rather than asserts, unlike the rest of this module: `python -O`
+    strips asserts, and this one is the only guard standing in front of an
+    rmtree -- stripped, it becomes the unconditional delete it exists to stop.
     """
     out = dataset_dir(dataset)
     if out.exists():
-        assert force, f"{out} already exists -- pass --force to rebuild it"
+        if not force:
+            raise FileExistsError(f"{out} already exists -- pass --force to rebuild it")
         shutil.rmtree(out)
     return out
 

@@ -56,6 +56,14 @@ def test_failed_is_not_mistaken_for_built(tmp_path):
     assert mf.built(manifest, manifest_path, "litert", "int8") is None
 
 
+def test_is_sentinel_tells_an_explanation_from_a_path():
+    """The one matcher for this format. migrate_artifacts used to keep its own
+    copy, which is how the two sides came to disagree."""
+    assert mf.is_sentinel(f"{mf.FAILED}: RuntimeError: boom")
+    assert mf.is_sentinel(f"{mf.UNSUPPORTED}: ncnn has no int8 export path")
+    assert not mf.is_sentinel("bench_int8.onnx")
+
+
 def test_missing_and_absent_cells_are_none(tmp_path):
     manifest_path = tmp_path / mf.NAME
     assert mf.built({}, manifest_path, "onnx", "fp32") is None

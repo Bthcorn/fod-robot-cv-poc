@@ -1,0 +1,7 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a,ncnn,fp32,4,reused,43.224,45.082,23.135,2.805,39.092,1.012,10.48,n/a,n/a,65.0,72.2,throttled=0x0,4.15,ok
+best.pt,fod-a,ncnn,fp16,4,reused,43.265,43.508,23.113,2.801,39.148,1.023,5.33,n/a,n/a,65.5,72.2,throttled=0x0,4.08,ok
+best.pt,fod-a,ncnn,int8,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.0,n/a,n/a,4.02,SKIPPED: Ultralytics has no int8 export path for ncnn
+best.pt,fod-a,hailo,fp32,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,n/a,n/a,4.06,SKIPPED: Ultralytics has no fp32 export path for hailo
+best.pt,fod-a,hailo,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.0,n/a,n/a,4.06,SKIPPED: Ultralytics has no fp16 export path for hailo
+best.pt,fod-a,hailo,int8,4,reused,17.723,18.008,56.424,2.935,14.064,0.419,7.58,n/a,n/a,65.0,66.1,throttled=0x0,4.05,ok

@@ -32,6 +32,7 @@ from ultralytics import YOLO
 from fodcv import manifest as mf
 from fodcv.matrix import (
     DEFAULT_PRECISIONS,
+    FMT_EXTRA_ARGS,
     FORMATS,
     IMGSZ,
     PRECISIONS,
@@ -122,14 +123,14 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
     return out
 
 
-def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
-        precisions=None, imgsz=IMGSZ, force=False):
+def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
+        precisions=None, imgsz=IMGSZ, force=False, conf=None):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
-    weights = Path(weights) if weights else run_weights(run)
+    weights = Path(weights) if weights else run_weights(run_id)
     assert weights.exists(), (
-        f"no weights at {weights} -- train.py, then migrate_artifacts.py --run {run}"
+        f"no weights at {weights} -- train.py, then migrate_artifacts.py --run {run_id}"
     )
     data_yaml = dataset_yaml(dataset)
     assert data_yaml.exists(), (
@@ -158,15 +159,27 @@ def run(run=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                     if fmt == "litert":
                         path = export_litert(weights, imgsz, quantize, calib)
                     else:
+                        # `conf` overrides only where the format already declares one --
+                        # hailo, whose NMS threshold is compiled into the .hef and cannot
+                        # be lowered at inference time. Every other backend takes conf= at
+                        # call time and must not have one baked in here.
+                        extra = dict(FMT_EXTRA_ARGS.get(fmt, {}))
+                        if conf is not None and "conf" in extra:
+                            extra["conf"] = conf
                         path = YOLO(str(weights)).export(
                             format=fmt,
                             imgsz=imgsz,
                             quantize=quantize,
                             data=str(calib) if takes_calibration(fmt, quantize) else None,
+                            **extra,
                         )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that can't be loaded back is not an export.
-                    YOLO(path).predict(source=str(next(dataset_val_images(dataset).glob("*.jpg"))), verbose=False)
+                    # Except for hailo: HailoBackend opens the PCIe device on load, and the compile
+                    # host (x86 container) is never the inference host, so a good .hef would be
+                    # recorded as FAILED. Its equivalent check is `hailortcli parse-hef` on the Pi.
+                    if fmt != "hailo":
+                        YOLO(path).predict(source=str(next(dataset_val_images(dataset).glob("*.jpg"))), verbose=False)
                     manifest[key] = mf.entry_for(path, manifest_path)
                 except Exception as e:
                     manifest[key] = f"{mf.FAILED}: {type(e).__name__}: {e}"

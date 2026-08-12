@@ -1,0 +1,19 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a,hailo,fp32,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,61.7,62.2,throttled=0x0,3.92,FAILED: AssertionError: Hailo export is only supported on Linux x86_64.
+best.pt,fod-a,hailo,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,61.1,n/a,n/a,3.92,SKIPPED: Ultralytics has no fp16 export path for hailo
+best.pt,fod-a,hailo,int8,4,reused,19.112,19.826,52.323,2.848,15.459,0.363,7.58,n/a,n/a,62.2,61.7,throttled=0x0,4.1,FAILED: HailoRTException: libhailort failed with error: 74 (HAILO_OUT_OF_PHYSICAL_DEVICES)
+best.pt,fod-a,ncnn,fp32,4,reused,47.367,60.009,21.112,2.813,43.232,0.949,10.48,0.721,0.441,61.1,65.5,throttled=0x0,3.94,ok
+best.pt,fod-a,ncnn,fp16,4,reused,45.327,102.877,22.062,2.705,41.335,0.965,5.33,0.718,0.441,64.5,65.5,throttled=0x0,3.98,ok
+best.pt,fod-a,ncnn,int8,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,63.9,n/a,n/a,4.02,SKIPPED: Ultralytics has no int8 export path for ncnn
+best.pt,fod-a,litert,fp32,4,reused,86.36,116.215,11.579,2.823,82.122,0.953,10.585,0.718,0.439,63.9,67.2,throttled=0x0,3.97,ok
+best.pt,fod-a,litert,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.0,n/a,n/a,3.8,SKIPPED: Ultralytics has no fp16 export path for litert
+best.pt,fod-a,litert,int8,4,reused,24.018,25.809,41.635,2.944,20.02,0.655,3.031,0.474,0.264,65.0,66.1,throttled=0x0,3.84,ok
+best.pt,fod-a,mnn,fp32,4,reused,60.646,63.663,16.489,2.86,56.299,1.101,10.447,0.72,0.436,65.5,67.2,throttled=0x0,4.07,ok
+best.pt,fod-a,mnn,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,65.5,throttled=0x0,3.84,FAILED: ModuleNotFoundError: No module named 'onnx'
+best.pt,fod-a,mnn,int8,4,reused,58.769,60.331,17.016,2.786,54.634,1.017,2.813,0.739,0.46,65.0,67.2,throttled=0x0,3.84,ok
+best.pt,fod-a,onnx,fp32,4,reused,91.607,131.758,10.916,4.943,84.374,1.829,10.533,0.718,0.439,65.0,70.5,throttled=0x0,3.81,ok
+best.pt,fod-a,onnx,fp16,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,65.5,66.7,throttled=0x0,3.86,FAILED: ModuleNotFoundError: No module named 'onnx'
+best.pt,fod-a,onnx,int8,4,reused,105.151,162.424,9.51,5.031,97.82,1.314,2.991,0.606,0.36,65.0,71.0,throttled=0x0,4.06,ok
+best.pt,fod-a,openvino,fp32,4,reused,72.582,111.723,13.778,3.017,68.226,1.029,10.697,0.718,0.439,64.5,71.0,throttled=0x0,3.89,ok
+best.pt,fod-a,openvino,fp16,4,exported,70.925,104.337,14.099,3.137,66.301,1.037,5.61,0.717,0.438,65.5,71.0,throttled=0x0,4.03,ok
+best.pt,fod-a,openvino,int8,4,reused,157.834,168.179,6.336,2.997,153.617,0.714,3.342,0.69,0.428,65.5,72.7,throttled=0x0,4.05,ok

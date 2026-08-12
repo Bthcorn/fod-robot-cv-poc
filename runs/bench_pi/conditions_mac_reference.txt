@@ -1,0 +1,15 @@
+platform: macOS-26.5.2-arm64-arm-64bit
+machine: arm64
+cpu_temp_c: n/a
+clock_arm_hz: n/a
+throttled: n/a
+model: 
+omp_num_threads: 1
+cpu_affinity: n/a
+power_w: n/a
+weights: /Users/bowornthat/Projects/GraduateProject/cv-poc/runs/train_poc/weights/best.pt
+drift_pct: -19.2
+cpu_temp_c_end: n/a
+val_images: 90
+imgsz: 640
+runs: 50 (warmup 5)
