@@ -1,0 +1,3 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a,ncnn,fp32,4,reused,21.995,22.787,45.465,1.492,19.228,0.941,10.448,0.451,0.237,65.5,68.3,throttled=0x80000,3.8,ok
+best.pt,fod-a,ncnn,fp16,4,reused,22.978,23.377,43.519,1.537,20.169,0.98,5.298,0.451,0.239,65.5,68.8,throttled=0x80000,4.19,ok

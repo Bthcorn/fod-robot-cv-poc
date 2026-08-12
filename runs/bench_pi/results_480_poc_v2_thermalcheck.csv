@@ -1,0 +1,5 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,fod-a-3k,onnx,fp32,4,reused,91.973,95.401,10.873,4.226,85.206,1.662,10.533,n/a,n/a,64.5,75.5,throttled=0x80000,3.75,ok
+best.pt,fod-a-3k,onnx,int8,4,reused,88.534,91.519,11.295,4.057,82.37,1.304,2.991,n/a,n/a,63.4,72.2,throttled=0x80000,3.73,ok
+best.pt,fod-a-3k,openvino,fp32,4,reused,65.323,66.317,15.308,2.76,60.967,1.02,10.697,n/a,n/a,62.8,73.2,throttled=0x80000,3.72,ok
+best.pt,fod-a-3k,openvino,int8,4,reused,169.079,190.949,5.914,2.609,165.079,1.03,3.342,n/a,n/a,62.8,73.8,throttled=0x80000,3.69,ok

@@ -13,7 +13,16 @@ wheels/
 
 # PoC data/outputs (large, regenerable via scripts/)
 data/
-runs/
+# ...except the benchmark evidence. RESULT.md claims every number traces to a
+# file here, which is only true if they ship: 172 KB of CSVs against 132 MB of
+# checkpoints, plots and val dirs. Numbers only -- no weights, no images.
+# Written as `runs/*` rather than `runs/`: git cannot re-include a path whose
+# parent directory is itself excluded, so the negations below would never fire.
+runs/*
+!runs/bench_pi/
+runs/bench_pi/*
+!runs/bench_pi/*.csv
+!runs/bench_pi/*.txt
 # Built per run and rsynced to the Pi, not carried in git. The suffix patterns
 # below miss .mnn and the ncnn/openvino model *directories*, so ignore the tree.
 artifacts/
