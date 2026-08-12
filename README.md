@@ -16,6 +16,7 @@ Presentation write-up of the detection findings: <https://claude.ai/code/artifac
 | Median confidence | **0.534 → 0.936** | Stage H |
 | Blocking limitation | FOD-A is ~38 scenes of one object on blank concrete | Stage H |
 | Deploy artifact | `poc-v2-480` — `.hef` compiled at conf 0.10, 2,550 calibration images | Stage F |
+| Hailo INT8 vs FP32, new weights | **0.995 vs 0.995** — lossless, on the leak-free split | Stage I |
 | **Not yet measured** | the camera, with the new model. Every accuracy figure above is FOD-A's task | — |
 
 **The short version.** The `.hef` was never the problem and neither was the optics. Three things were: the camera's lens was parked at 1.00 m because nothing ever set `AfMode` (libcamera's default is Manual); the training set was capped at 600 images and contained **ten screws**; and FOD-A contains no cluttered scenes at all, so the model cannot abstain and answers `unknown` on furniture. Focus is fixed and costs nothing (33.38 ms against a 33.30 ms baseline). Lifting the cap to 3,000 images fixed the confidence. The third is not fixable from FOD-A — **PRD §10's own-image collection is now the critical path, not an eventual refinement.**
@@ -472,6 +473,29 @@ Half of `poc-v1`'s correct answers scored under 0.53 on data it was built for, w
 `poc-v2-480` ships with the scene-clean 263 as its `eval/` split rather than `fod-a-3k`'s own val, so a future benchmark cannot silently reproduce the inflated 0.948; `run.json` records the split name and its no-nail limitation.
 
 **Still unmeasured: the camera.** Every number above is FOD-A's task — one object, blank plane. How much of a 0.53 → 0.94 confidence gain survives contact with a cluttered desk is the open question, and the next thing to run.
+
+### Stage I — poc-v2 on the board: INT8 is lossless, and a desktop session proves Stage F's point twice
+
+`runs/bench_pi/results_480_poc_v2_clean.csv`, scored against the run's shipped scene-clean 263, imgsz 480, 4 threads, `throttled=0x0`, drift +1.1%.
+
+| Format | Prec | mAP50 | mAP50-95 | Median ms | p95 ms | Size MB |
+|---|---|---:|---:|---:|---:|---:|
+| ncnn | fp32 | 0.995 | 0.856 | 51.99 | 53.07 | 10.48 |
+| **hailo** | **int8** | **0.995** | 0.851 | **18.66** | 18.76 | 7.68 |
+| | | **0.000** | **−0.6%** | | | |
+
+**Quantization is lossless on these weights.** That had to be re-measured rather than carried over — quantization error depends on the weight distribution, not just the architecture — and it comes out cleaner than `poc-v1`'s build, which is what a 2,550-image calibration set against 510 was supposed to buy. AC-2's INT8 question is now answered on a leak-free split for the first time.
+
+**The latency column is taxed and must not replace Stage F's.** A graphical desktop session was live on the board, the failure mode recorded in the run protocol above:
+
+| Cell | This run (desktop live) | Stage F (idle) | Penalty |
+|---|---:|---:|---|
+| ncnn fp32 | 51.99 ms | 44.81 ms | **+16%** |
+| hailo int8 | 18.66 ms | 17.96 ms | +3.9% |
+
+The *differential* is worth keeping, though, because it re-derives Stage F's architectural finding by accident: host contention costs the CPU backend 16% and the accelerator 3.9%, for the same reason the two-core test found — Hailo's inference is not on the CPU, so host load barely reaches it. Two unrelated ways of stealing CPU, the same answer.
+
+Two protocol additions this run cost a false start each. `cpupower` is **not installed** on this board, so the governor has to be set through sysfs (`echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`) — it was sitting on `ondemand` at 1.6 GHz, which would have produced a silently wrong sweep. And a non-interactive `ssh` does not get `uv` on `PATH`; use `~/.local/bin/uv`.
 
 ### FOD-A is single-object-on-blank-surface photography
 
