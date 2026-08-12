@@ -15,6 +15,8 @@ Presentation write-up of the detection findings: <https://claude.ai/code/artifac
 | Accuracy, scene-disjoint split | **mAP50 0.675 → 0.995**, screw recall **0.433 → 1.000** | Stage H |
 | Median confidence | **0.534 → 0.936** | Stage H |
 | Blocking limitation | FOD-A is ~38 scenes of one object on blank concrete | Stage H |
+| Deploy artifact | `poc-v2-480` — `.hef` compiled at conf 0.10, 2,550 calibration images | Stage F |
+| **Not yet measured** | the camera, with the new model. Every accuracy figure above is FOD-A's task | — |
 
 **The short version.** The `.hef` was never the problem and neither was the optics. Three things were: the camera's lens was parked at 1.00 m because nothing ever set `AfMode` (libcamera's default is Manual); the training set was capped at 600 images and contained **ten screws**; and FOD-A contains no cluttered scenes at all, so the model cannot abstain and answers `unknown` on furniture. Focus is fixed and costs nothing (33.38 ms against a 33.30 ms baseline). Lifting the cap to 3,000 images fixed the confidence. The third is not fixable from FOD-A — **PRD §10's own-image collection is now the critical path, not an eventual refinement.**
 
@@ -123,7 +125,7 @@ onto `src/fodcv/cli/`, declared in `pyproject.toml` under `[project.scripts]`.
 | `fodcv-smoke` | `cli/smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
 | `fodcv-train` | `cli/train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/` — a plumbing check, not a real accuracy result. |
 | `fodcv-migrate` | `cli/migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
-| `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. |
+| `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi** — see v3. `--conf` sets the score threshold compiled into a Hailo `.hef`; ignored by every other format, which take `conf=` at call time. |
 | `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test (Ultralytics streaming inference), Mac-only stand-in for the Pi's real camera. |
 | `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices (useful for picking the right one, e.g. an iPhone via Continuity Camera). |
 | `fodcv-policy` | `cli/confidence_policy.py` | v2: confidence hysteresis + multi-frame EMA smoothing demo, prototyping the gazing-angle mitigation below. |
@@ -205,6 +207,18 @@ So `export.py` builds every artifact here and writes `artifacts/<run-id>/exports
 uv run fodcv-export --run poc-v1                  # Mac
 rsync -a artifacts/poc-v1/ pi:cv-poc/artifacts/poc-v1/
 ```
+
+The Hailo `.hef` is the exception — it needs the x86-64 compiler container, and `bash -s` reads the script on stdin so it cannot take positional arguments. Parameters go through the environment:
+
+```
+docker --context desktop-linux run --platform linux/amd64 --rm -i \
+  -v "$PWD":/work -w /work -v "$HOME/Downloads":/wheels:ro \
+  -v hailo-pipcache:/root/.cache/pip \
+  -e HEF_RUN=poc-v2-480 -e HEF_DATASET=fod-a-3k -e HEF_IMGSZ=480 -e HEF_CONF=0.10 \
+  python:3.10-slim bash -s < docker/hailo-compile.sh
+```
+
+All four default to the `poc-v1-480` build (`fod-a`, 480, 0.001), so the original invocation still reproduces.
 
 Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/data.yaml` omits `path:` so Ultralytics resolves the splits against the yaml's own directory. The run directory therefore works at whatever absolute path it lands on. (`path: .` would *not* work — "." exists, so Ultralytics keeps it and resolves against the current working directory instead.) `artifacts/<run-id>/eval/` also carries the 90-image val split, so the Pi can score mAP without a copy of `data/`, and pins the eval set to the run it belongs to.
 
@@ -334,7 +348,16 @@ Hailo does not move because its inference is not on the CPU at all — NMS is co
 
 **Soak, 600 s** (`soak_480_hailo_idle.csv`): 30,874 frames, **51.8 FPS sustained**, median 19.13 ms, first quarter → last quarter **−0.1%**, 65.5 → 70.0 °C, `throttled=0x0`, 4.11 W median / 6.08 W peak. No thermal decay, and the PCIe link shared with the NVMe never showed up as contention. Note sustained runs ~6% slower than the 50-run burst — **51.8 FPS is the figure for a robot**, 55.7 belongs to the leaderboard.
 
-**What it costs.** The `.hef` is buildable neither on the Pi nor natively on the Mac: it needs an x86-64 Linux Dataflow Compiler under emulation (`docker/hailo-compile.sh`, ~26 min). NMS thresholds are compiled in, so retuning detection sensitivity means recompiling — every CPU backend takes `conf=` at call time. The calibration set is undersized at 510 images against Hailo's recommended ≥1,024, and the network needs three contexts rather than one, so there is headroom this measurement does not reach.
+**What it costs.** The `.hef` is buildable neither on the Pi nor natively on the Mac: it needs an x86-64 Linux Dataflow Compiler under emulation (`docker/hailo-compile.sh`). NMS thresholds are compiled in, so retuning detection sensitivity means recompiling — every CPU backend takes `conf=` at call time. The network needs three contexts rather than one, so there is headroom this measurement does not reach.
+
+Compile time scales with the calibration set, because quantization-aware fine-tuning runs four epochs over it inside the emulated container:
+
+| Build | Calibration images | Compile |
+|---|---:|---|
+| `poc-v1-480` | 510 — **under** Hailo's recommended ≥1,024 | ~26 min |
+| `poc-v2-480` | **2,550** — first build above it | **86 min** |
+
+`--conf` sets the threshold compiled into the `.hef` (`cli/export.py`), so it is a flag rather than an edit to `FMT_EXTRA_ARGS`. The matrix default stays **0.001** — the benchmark row needs its low-confidence tail to stay comparable to the host-NMS backends. A deploy build wants a usable floor instead: `poc-v2-480` is compiled at **0.10**, which on the Pi is a floor `--conf` can only filter *above*, so one build covers both diagnosis and deployment without a second 86-minute compile.
 
 **This is a measurement, not a decision.** Adopting an accelerator is a BOM change gated on advisor sign-off (O-2), and PRD v2 commits to Pi 5 CPU-only. Do not amend FR-1/§8 from this alone.
 
@@ -432,6 +455,23 @@ Two consequences. Any FOD-A mAP in this README is a *relative* figure for rankin
 | unknown mAP50 | 0.969 | 0.995 |
 
 The set carries 47 screw, 210 unknown, 6 bolt and **no nail** — nails live almost entirely in the long scenes both runs sampled — so it settles screw and says little about nail. Screw recall 0.433 → 1.000 is the real gain, and it is the class the camera failed on.
+
+**Confidence is the number Stage G actually complained about**, and it moved further than mAP did. Correct-class score on the same 263 images:
+
+| | poc-v1 | poc-v2 |
+|---|---:|---:|
+| found at all | 253/263 | **263/263** |
+| median score | 0.534 | **0.936** |
+| p25 | 0.314 | 0.913 |
+| ≥ 0.25 | 81% | **100%** |
+| ≥ 0.50 | 52% | 100% |
+| ≥ 0.70 | 26% | **98%** |
+
+Half of `poc-v1`'s correct answers scored under 0.53 on data it was built for, which is what "low confidence, misses items" looks like from the model's side. It also settles the threshold question Stage G raised: recompiling the `.hef` lower was worth +4% recall for 3.6× the false boxes, and is now moot — `poc-v2` clears 0.25 on everything it finds.
+
+`poc-v2-480` ships with the scene-clean 263 as its `eval/` split rather than `fod-a-3k`'s own val, so a future benchmark cannot silently reproduce the inflated 0.948; `run.json` records the split name and its no-nail limitation.
+
+**Still unmeasured: the camera.** Every number above is FOD-A's task — one object, blank plane. How much of a 0.53 → 0.94 confidence gain survives contact with a cluttered desk is the open question, and the next thing to run.
 
 ### FOD-A is single-object-on-blank-surface photography
 
