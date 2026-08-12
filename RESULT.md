@@ -16,7 +16,8 @@ Every number here traces to a CSV under `runs/bench_pi/`. Where a figure must **
 | **Live detection failed for three reasons** | The lens was parked at 1 m and autofocus was never enabled; the model had seen ten screws; the dataset contains no cluttered scenes |
 | **Confidence is fixed** | Median correct-class score 0.534 → 0.936 on identical images |
 | **The dataset is the ceiling** | FOD-A is ~38 scenes of one object on blank concrete. It cannot teach the model to abstain, so own-image collection is now the critical path |
-| **Still unmeasured** | The camera, with the new model. Every accuracy figure here is FOD-A's task |
+| **It works on hardware** | 12 of 12 real fasteners detected across two live frames, confidence 0.42–0.87, nothing fired on the clutter |
+| **Still wrong** | Screws are labelled `bolt`. Detection is solved; naming is not |
 
 ---
 
@@ -110,7 +111,7 @@ This re-run existed to test one specific worry: `poc-v2` is far more confident, 
 
 | Runtime | 4 cores | 2 cores | Change |
 |---|---:|---:|---|
-| ncnn fp16 | 43.94 ms | **57.67 ms** | **+31.3%** |
+| ncnn fp16 | 43.94 ms | **57.67 ms** | **+31.2%** |
 | hailo int8 | 17.83 ms | **17.82 ms** | **−0.1%** |
 
 **Halving the core budget costs the CPU backend a third of its throughput and the accelerator nothing**, because Hailo's inference is not on the CPU at all — NMS is compiled onto the chip, so the host only letterboxes and parses results. The gap widens from **2.46× to 3.24×**.
@@ -237,6 +238,22 @@ Correct-class score on the 263 scene-clean images:
 
 Half of v1's correct answers scored under 0.53 on data it was built for — that is what "low confidence, misses items" looks like from the model's side. It also retires the threshold question: lowering the compiled NMS floor was worth +4% recall for 3.6× the false boxes, and v2 clears 0.25 on everything it finds.
 
+### On real fasteners, on the board
+
+The test the whole investigation was aiming at. Live frames from the Pi, autofocus on, `unknown` suppressed, `poc-v2` on the Hailo-8:
+
+| | |
+|---|---|
+| Objects in frame | 12 across two frames (6 bolts, 6 screws) |
+| Detected | **12** — boxes tight and correctly placed |
+| Confidence range | 0.42 – 0.87 |
+| False positives on clutter | **none** — a bag, cables, glasses and boxes all ignored |
+| Class correctness | **screws are labelled `bolt`**, one as `nail` |
+
+Detection and localisation are solved. **Naming is not**, and 36 screw training instances is exactly why — the model finds the object and reaches for the nearest class it knows well. That is the same failure Stage G diagnosed on a cropped screw, now at a much higher confidence.
+
+Two honest limits. The fasteners sit on a plain white sheet, so the clutter is *behind* them rather than around them — this is not yet an arena-floor test. And twelve objects across two frames is a demonstration, not a recall measurement.
+
 ---
 
 ## 7. The dataset limitation
@@ -325,7 +342,8 @@ Each one line, each carrying the number that justifies it. This is where the sup
 
 ## 12. Still open
 
-- **The camera test with v2.** Everything above is FOD-A's task — one fastener on a blank plane. How much of the confidence gain survives contact with a cluttered floor is unmeasured, and it is the question that started this.
+- **Class confusion.** Screws are found reliably and named `bolt`. PRD FR-3 specifies a single `metal_fastener` class anyway, with per-class recall recovered from the seeding log — that may be the fix rather than more screw images, since FOD-A only holds 157 in total.
+- **A real cluttered-floor test.** The live result put fasteners on a plain sheet with clutter behind them. Debris lying *on* a textured arena floor is the case that matters and is still untested.
 - **The arena dataset** (PRD §10). Now the critical path, not an eventual refinement.
 - **Scene-grouped splitting** before that data is trained on. A per-image shuffle cannot produce a trustworthy score on video-derived data, and arena footage will be video-derived too.
 - **`--angle-aug`**, still never run.
