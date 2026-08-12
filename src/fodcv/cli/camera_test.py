@@ -1,7 +1,7 @@
-"""Live webcam smoke test. No Pi 5 yet, so this uses the Mac's built-in/USB
-camera via OpenCV (source=0) instead of picamera2 -- just to prove
-camera->inference->display works before real hardware exists. Real capture
-on the Pi uses picamera2 with locked exposure/AWB (PRD §9/§10), not this.
+"""Live webcam smoke test on the Mac: proves camera->inference->display works.
+
+Uses OpenCV (source=0), not picamera2. Real capture on the Pi is
+pi/camera_hailo.py.
 """
 
 import argparse
@@ -20,10 +20,10 @@ def main():
     weights = resolve_weights(args.run)
     print(f"using weights: {weights}")
 
-    camera_index = args.camera_index
     model = YOLO(weights)
-    # stream=True -> generator; must iterate to actually pump frames. Ctrl-C or 'q' in the window to stop.
-    for _ in model.predict(source=camera_index, show=True, stream=True, imgsz=640):
+    # stream=True returns a generator: iterating is what pumps frames. Ctrl-C or
+    # 'q' in the window to stop.
+    for _ in model.predict(source=args.camera_index, show=True, stream=True, imgsz=640):
         pass
 
 

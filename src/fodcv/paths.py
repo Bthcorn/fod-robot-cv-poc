@@ -1,28 +1,16 @@
 """Where things live on disk, and which run counts as "the" run.
 
-Three directories, three jobs:
+  data/<dataset-id>/    prepared dataset. Big, gitignored, Mac-side.
+  runs/                 Ultralytics scratch. Only migrate_artifacts reads it.
+  artifacts/<run-id>/   the deploy unit: weights, exports, manifest, eval split.
+                        One rsync moves it to the Pi.
 
-  data/<dataset-id>/    a prepared dataset: data.yaml, images/, labels/.
-            Big, gitignored, Mac-side, rebuildable from the registry.
-  runs/     Ultralytics' own scratch: checkpoints, plots, val dirs. Never read
-            by anything but the migration script.
-  artifacts/<run-id>/   the deploy unit. Weights, exports, manifest, and the
-            eval split the benchmark scores against -- everything the Pi needs
-            and nothing it doesn't. One rsync moves it.
+A run-id names one trained model everywhere, a dataset-id one prepared dataset.
+Both default to a constant here, so one edit moves every command.
 
-Two ids, same shape. A run-id names one trained model everywhere; a dataset-id
-names one prepared dataset. Both default to a single constant here, so one edit
-moves every command.
-
-The run-id exists because there were once three different answers to "which
-weights": policy.py preferred train_poc_v2 then train_poc, export.py hardcoded
-train_poc with no fallback, camera_test.py had a third copy. The dataset-id
-exists for the mirror-image reason: there was one hardcoded dataset directory,
-and preparing a second one deleted the first.
-
-This module is imported by runtime/, so it must not import from research/ --
-hence the dataset *id* lives here while the registry that describes each dataset
-lives in research/datasets.py.
+Trap: imported by runtime/, so it must not import from research/ -- hence the
+dataset *id* lives here and the registry describing it lives in
+research/datasets.py.
 """
 
 from pathlib import Path
@@ -56,8 +44,8 @@ def calib_yaml_path(dataset: str = CURRENT_DATASET) -> Path:
     """INT8 calibration yaml, beside the dataset it calibrates from.
 
     Not in artifacts/<run>/: it repoints `val:` at the train split, and both
-    yamls omit `path:` so their splits resolve relative to wherever the yaml
-    sits. A copy in the run directory would look for images/train there.
+    yamls omit `path:`, so splits resolve relative to wherever the yaml sits.
+    A copy in the run directory would look for images/train there.
     """
     return dataset_dir(dataset) / "data-calib.yaml"
 
@@ -83,9 +71,8 @@ def run_metadata(run: str = CURRENT_RUN) -> Path:
 def resolve_weights(run: str = CURRENT_RUN) -> str:
     """Weights for a demo or live run: the run's if published, stock otherwise.
 
-    Export deliberately does not use this -- exporting the stock COCO model
-    would produce a whole matrix of artifacts for the wrong model. It takes the
-    run's weights and refuses when they are missing.
+    Export must NOT use this -- falling back to the stock COCO model would build
+    a whole artifact matrix for the wrong weights. It refuses instead.
     """
     weights = run_weights(run)
     return str(weights) if weights.exists() else STOCK_WEIGHTS

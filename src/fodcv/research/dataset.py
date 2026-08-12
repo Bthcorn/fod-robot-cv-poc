@@ -1,25 +1,19 @@
 """Turn a registered source into a prepared dataset at `data/<dataset-id>/`.
 
-Two kinds of source, one output shape. Whatever the input, preparing a dataset
-leaves a directory Ultralytics can train and score against directly:
+Two kinds of source, one output shape Ultralytics can train and score directly:
 
     data/<dataset-id>/
       data.yaml          no `path:` key -- see write_data_yaml
       images/{train,val}
       labels/{train,val}
 
-VOC sources (FOD-A) are downloaded and converted: 31 categories collapse to the
-4-class PoC scheme, and only images carrying a mapped box are kept. That is an
-experiment/comparison -- PRD FR-3 specifies training a single `metal_fastener`
-class and recovering per-class recall from the seeding log.
-
-YOLO sources are already labelled by a tool that exports YOLO, so there is
-nothing to download and nothing to convert. They are copied in and validated.
+VOC sources (FOD-A) are downloaded and converted -- 31 categories collapse to
+the 4-class PoC scheme, keeping only images with a mapped box. That is the
+comparison experiment; PRD FR-3 specifies a single `metal_fastener` class.
+YOLO sources are already labelled, so they are copied in and validated.
 
 Preparing is scoped to one dataset's own directory and refuses to overwrite an
-existing one without `force`. The previous version opened with an unconditional
-`shutil.rmtree` on the single shared output directory, so preparing a second
-dataset destroyed the first.
+existing one without `force` -- see _claim_output.
 """
 
 import random
@@ -35,22 +29,16 @@ from fodcv.research.datasets import SOURCES, VocSource, YoloSource, source
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 
 
-# --------------------------------------------------------------------------
-# shared
-# --------------------------------------------------------------------------
-
-
 def write_data_yaml(data_yaml: Path, class_names: dict[int, str],
                     train: str = "images/train", val: str = "images/val") -> Path:
     """Write a data.yaml with **no `path:` key**, deliberately.
 
-    Ultralytics resolves the dataset root as
-    `data.get("path") or Path(data["yaml_file"]).parent`, so omitting `path:`
-    makes every split relative to the yaml's own directory -- correct from any
-    working directory and after the tree is copied anywhere.
+    Ultralytics resolves the root as `data.get("path") or
+    Path(data["yaml_file"]).parent`, so omitting `path:` makes every split
+    relative to the yaml itself -- correct from any cwd and after an rsync.
 
-    Note `path: .` does NOT do this: "." exists, so Ultralytics keeps it and
-    resolves the splits against the *current working directory* instead.
+    `path: .` does NOT do this: "." is truthy, so splits resolve against the
+    current working directory instead.
     """
     names_block = "\n".join(f"  {cid}: {name}" for cid, name in sorted(class_names.items()))
     data_yaml.parent.mkdir(parents=True, exist_ok=True)
@@ -66,10 +54,8 @@ def write_data_yaml(data_yaml: Path, class_names: dict[int, str],
 def split(items: list, val_fraction: float, seed: int, subset_size: int | None = None) -> dict[str, list]:
     """Deterministic train/val split: shuffle, trim, then cut.
 
-    Seeded, or two machines score different images. The order matters and must
-    not be rearranged -- trimming after the cut instead of before would move
+    That order is load-bearing. Trimming after the cut instead of before moves
     images between train and val, silently changing every mAP already recorded.
-    `random.Random(seed)` reproduces the previous global `random.seed(seed)`.
     """
     items = list(items)
     random.Random(seed).shuffle(items)
@@ -82,14 +68,10 @@ def split(items: list, val_fraction: float, seed: int, subset_size: int | None =
 def _claim_output(dataset: str, force: bool) -> Path:
     """Clear the dataset's own directory, and only ever its own.
 
-    Checked before any download or parsing so a refusal costs nothing. The
-    previous version opened the conversion with an unconditional rmtree of the
-    single shared output directory, so preparing a second dataset destroyed the
-    first without asking.
+    Checked before any download or parsing, so a refusal costs nothing.
 
     Raises rather than asserts, unlike the rest of this module: `python -O`
-    strips asserts, and this one is the only guard standing in front of an
-    rmtree -- stripped, it becomes the unconditional delete it exists to stop.
+    strips asserts, and this is the only guard in front of an rmtree.
     """
     out = dataset_dir(dataset)
     if out.exists():
@@ -115,22 +97,19 @@ def available() -> list[dict]:
 def prepare(dataset: str = CURRENT_DATASET, force: bool = False) -> Path:
     """Build `data/<dataset>/` from its registered source. Returns the data.yaml."""
     src = source(dataset)
-    out = _claim_output(dataset, force)  # up front: refusing must cost nothing
+    out = _claim_output(dataset, force)
     if isinstance(src, VocSource):
         return _prepare_voc(dataset, src, out)
     return _prepare_yolo(dataset, src, out)
 
 
-# --------------------------------------------------------------------------
-# Pascal VOC sources
-# --------------------------------------------------------------------------
+# --- Pascal VOC sources ---
 
 
 def fetch_voc(src: VocSource) -> Path:
     """Download + extract a VOC zip from Google Drive. Idempotent.
 
-    The FOD-A GitHub repo (FOD-UNOmaha/FOD-data) only ships tools/docs, not the
-    images -- the actual data lives on Google Drive, linked from its README.
+    Drive, not GitHub: FOD-UNOmaha/FOD-data ships only tools and docs.
     """
     DATA_DIR.mkdir(exist_ok=True)
     zip_path = DATA_DIR / src.zip_name
@@ -205,9 +184,7 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
     return data_yaml
 
 
-# --------------------------------------------------------------------------
-# already-YOLO sources
-# --------------------------------------------------------------------------
+# --- already-YOLO sources ---
 
 
 def _label_for(image: Path, root: Path) -> Path:
@@ -219,9 +196,8 @@ def _label_for(image: Path, root: Path) -> Path:
 def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
     """Every image has a label, and every class id used is declared.
 
-    A labelling tool exporting a class id the registry does not name produces a
-    model whose outputs silently mean the wrong thing, so this is an assert and
-    not a warning.
+    An assert, not a warning: a class id the registry does not name produces a
+    model whose outputs silently mean the wrong thing.
     """
     assert (root / "images").is_dir(), f"no images/ under {root}"
     assert (root / "labels").is_dir(), f"no labels/ under {root}"
@@ -270,8 +246,8 @@ def summary(dataset: str = CURRENT_DATASET) -> dict:
     out = dataset_dir(dataset)
     return {
         "dataset": dataset,
-        # str keys: json turns int keys into strings anyway, so be explicit
-        # rather than have run.json disagree with what was written.
+        # str keys: json stringifies int keys anyway, so be explicit rather than
+        # have run.json disagree with what was written.
         "classes": {str(cid): name for cid, name in source(dataset).class_names.items()},
         "train_images": len(list((out / "images" / "train").glob("*"))) if out.exists() else 0,
         "val_images": len(list((out / "images" / "val").glob("*"))) if out.exists() else 0,

@@ -1,22 +1,18 @@
-"""One-shot: lift an Ultralytics training run into artifacts/<run-id>/.
+"""Publish an Ultralytics training run as artifacts/<run-id>/.
 
-Run this once per historical training run. New runs get published the same way,
-but you only ever need it after `train.py` -- export, benchmark and deploy all
-read artifacts/<run-id>/ from then on.
+Run once after train.py; export, benchmark and deploy all read
+artifacts/<run-id>/ from then on. What moves:
 
-What moves, and why only this:
-
-  best.pt          the checkpoint. last.pt stays behind; nothing reads it.
-  bench_*          the exports already built. Copied rather than rebuilt so the
-                   benchmark numbers already recorded stay valid.
-  exports.json     rewritten with paths relative to itself, which is what makes
-                   the directory survive an rsync to a different absolute path.
+  best.pt          the checkpoint. last.pt stays behind, nothing reads it.
+  bench_*          exports already built, copied not rebuilt, so the benchmark
+                   numbers already recorded stay valid.
+  exports.json     rewritten relative to itself, so the directory survives an
+                   rsync to a different absolute path.
   eval/            the val split + a data.yaml with no `path:` key, so the Pi
-                   can score mAP without a copy of data/.
+                   scores mAP without a copy of data/.
 
-Deliberately left behind: the stray un-claimed best.onnx (outside the bench_
-namespace, so nothing in the manifest points at it) and runs/detect/val*
-(13 orphan Ultralytics dirs no code reads). runs/ itself is untouched.
+Left behind on purpose: the un-claimed best.onnx (nothing points at it) and
+runs/detect/val* orphans. runs/ itself is untouched.
 
     uv run fodcv-migrate --from runs/train_poc --run poc-v1
 """
@@ -43,8 +39,8 @@ from fodcv.research.datasets import class_names
 def copy_eval_split(dest, dataset: str):
     """Copy the val split in beside the run, with a location-independent yaml.
 
-    Both splits point at images/val: the run ships only its evaluation set, and
-    a `train:` key pointing at absent images would fail Ultralytics' check.
+    Both splits point at images/val -- the run ships only its evaluation set,
+    and a `train:` key naming absent images fails Ultralytics' check.
     """
     for kind in ("images", "labels"):
         src = dataset_dir(dataset) / kind / "val"
@@ -91,9 +87,8 @@ def migrate(source_dir, run: str, dataset: str):
     n = copy_eval_split(dest / "eval", dataset)
     print(f"eval split -> {dest / 'eval'} ({n} images)")
 
-    # Provenance. A benchmark row is not interpretable without the data behind
-    # it, and bench_pi refuses to score a run against a differently-classed
-    # dataset once this exists.
+    # Provenance. Without it a benchmark row is uninterpretable, and bench_pi
+    # cannot refuse a run scored against a differently-classed dataset.
     metadata = {
         "run": run,
         "dataset": dataset,

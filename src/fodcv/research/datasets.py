@@ -1,22 +1,16 @@
 """What datasets exist and how each one is built.
 
-A dataset-id names one prepared dataset everywhere, the way a run-id names one
-trained model. Before this there was exactly one dataset and it was hardcoded in
-seven places -- the Drive ID, FOD-A's exact extract path, its category strings,
-the subset size, the split fraction, the output directory, and the assumption
-that annotations are Pascal VOC XML.
-
-Two source kinds, because the two datasets that matter have nothing in common:
+A dataset-id names one prepared dataset everywhere, as a run-id names one
+trained model. Two source kinds, dispatched by isinstance in dataset.prepare:
 
   VocSource   download a zip, convert VOC XML -> YOLO. FOD-A.
-  YoloSource  already labelled by a tool that exports YOLO. Nothing to download,
-              nothing to convert -- PRD §10's ~2000-2500 arena images arrive
-              this way.
+  YoloSource  already labelled by a YOLO-exporting tool. Copied and validated.
 
-ponytail: a dict of frozen dataclasses, not a config format. The class map is
-Python data already, so a TOML file would only add a parser and a validation
-layer to write. Two kinds also means a plain isinstance dispatch beats any
-registry-of-handlers indirection.
+ponytail: a dict of frozen dataclasses, not a config format -- the class map is
+Python data already, so TOML would only add a parser and a validator.
+
+The arena dataset (PRD §10) is not registered yet; its entry and the split work
+it still needs are in docs/dataset-roadmap.md.
 """
 
 from dataclasses import dataclass, replace
@@ -31,15 +25,13 @@ class VocSource:
 
     drive_id: str
     zip_name: str
-    # FOD-A buries VOC2007 two levels down inside its zip.
-    extract_subdir: str
-    # VOC category name -> (our class name, our class id). Categories absent
-    # from this map are dropped, which is how 31 FOD-A categories become 4.
+    extract_subdir: str  # FOD-A buries VOC2007 two levels down in its zip
+    # VOC category -> (our class name, our class id). Unmapped categories are
+    # dropped -- how 31 FOD-A categories become 4.
     class_map: dict[str, tuple[str, int]]
     subset_size: int | None = None  # None = every image with a mapped box
     val_fraction: float = 0.15
-    # The split must be reproducible or two machines score different images.
-    seed: int = 0
+    seed: int = 0  # fixed, or two machines score different images
 
     @property
     def class_names(self) -> dict[int, str]:
@@ -71,52 +63,18 @@ SOURCES: dict[str, VocSource | YoloSource] = {
             "BoltWasher": ("unknown", 3),
             "BoltNutSet": ("unknown", 3),
         },
-        subset_size=600,  # PoC smoke test, not the real ~2000-2500 own-image dataset (PRD §10)
+        subset_size=600,  # PoC smoke test, not PRD §10's ~2000-2500 arena images
         val_fraction=0.15,
     ),
-    # The real dataset, once it exists. Commented out rather than shipped
-    # pointing at a directory that is not there yet -- `--list` would fail.
-    #
-    # PRD FR-3 specifies ONE trained class, `metal_fastener`; per-class recall is
-    # recovered at evaluation time from the seeding log. So this is 1 class, not
-    # the 4 the FOD-A comparison uses.
-    #
-    # BEFORE REGISTERING THIS, read PRD §10 step 4: "Split 70/15/15, grouped so
-    # one scene never spans train and test; keep a cross-venue holdout from the
-    # machine-shop visit." None of that is implemented, and it does not apply to
-    # FOD-A -- §10 step 1 calls FOD-A a pretraining prior, not a test set, which
-    # is why `split()` is still a plain per-image shuffle into train/val:
-    #   - A *scene* is one difference-imaging camera lock (§10 step 3: lock the
-    #     camera, shoot bg, place fasteners, shoot fg), so a single scene spans
-    #     many near-identical images. Shuffling per image puts the same scene on
-    #     both sides of the split and inflates held-out mAP. Group first.
-    #   - There is no test split at all yet; val_fraction cuts train/val only.
-    #   - The cross-venue holdout is a collection decision (which shoot is held
-    #     out), not something a split fraction can express -- most likely its own
-    #     dataset-id rather than a slice of this one.
-    #
-    # "arena-v1": YoloSource(
-    #     source_dir=Path("~/Downloads/arena-export").expanduser(),
-    #     class_names={0: "metal_fastener"},
-    #     val_fraction=0.15,
-    # ),
 }
 
 
-# The same FOD-A source with the smoke-test cap lifted. `subset_size=600` was a
-# deliberate scope decision -- FOD-A is a pretraining prior, and PRD §10 puts the
-# real training on ~2000-2500 self-collected arena images -- but 600 images is
-# 6% of the 9,623 FOD-A carries a mapped box for, and it starves the rare classes
-# worst: 14 screw instances used of 157 available, 85 nails of 1,193. Live
-# detection then fails on exactly nail and screw.
-#
-# A second id rather than an edit to `fod-a`, because preparing a dataset rebuilds
-# its directory and reshuffles which images land in val -- every mAP already
-# recorded is against fod-a's 90-image split, and those stay comparable only while
-# that split stays put.
-#
-# 3000 is the intermediate step: ~2.3 h on MPS against ~7.5 h for all 9,623, which
-# is enough to see whether the curve moves before committing a night to it.
+# Same source, smoke-test cap lifted. 600 images is 6% of the 9,623 FOD-A has a
+# mapped box for, and it starves the rare classes worst -- 14 screw instances of
+# 157, 85 nails of 1,193 -- which is why live detection failed on exactly those.
+# 3000 is the intermediate step: ~2.3 h on MPS against ~7.5 h for all of it.
+# A new id, not an edit: preparing a dataset reshuffles its val split, and every
+# mAP already recorded is against fod-a's 90 images.
 SOURCES["fod-a-3k"] = replace(SOURCES["fod-a"], subset_size=3000)
 
 

@@ -1,25 +1,20 @@
 """v2 prototype: confidence hysteresis + multi-frame temporal smoothing.
 
-Motivation: live testing showed detection confidence swings with the
-camera's gazing angle to a fastener (PRD §9 mounts the camera low and
-forward-tilted -- a grazing view by design). A single-frame hard threshold
-throws away a real detection the moment the angle is unfavorable. As the
-robot approaches, angle/range improve, so instead of trusting one frame:
+Confidence swings with the camera's gazing angle to a fastener (PRD §9 mounts
+it low and forward-tilted, a grazing view by design), so a single-frame hard
+threshold discards real detections whenever the angle is unfavourable. Instead:
 
-- track each detection across a few frames (simple greedy centroid tracker)
-- keep an exponential moving average (EMA) of its confidence
-- gate the speed-policy decision on the EMA via two thresholds (hysteresis),
-  not one hard cutoff:
+- track each detection across frames (greedy centroid tracker)
+- keep an EMA of its confidence
+- gate on the EMA with two thresholds, not one:
     CAUTION_THRESH <= ema < CONFIRM_THRESH  -> "possible debris, slow down"
-    ema >= CONFIRM_THRESH                    -> "confirmed, commit to retrieval"
-  and latch the confirmation: a track promoted to CONFIRM holds it until the
-  EMA falls all the way back below CAUTION_THRESH. Two thresholds without the
-  latch is just a three-bucket classifier -- an EMA sitting on either boundary
-  still flips state every frame, which is the flicker FR-4 wants removed.
+    ema >= CONFIRM_THRESH                   -> "confirmed, commit to retrieval"
+  and latch CONFIRM until the EMA falls back below CAUTION_THRESH. Without the
+  latch this is a three-bucket classifier: an EMA on either boundary still
+  flips every frame, which is the flicker FR-4 wants removed.
 
-This is a standalone demo, not wired into camera_test.py's live loop or the
-real Pi/ESP32 control path -- the actual speed-policy integration happens
-later in the robot runtime (PRD FR-4, budget in App. B.2).
+Standalone demo. The real speed-policy integration happens later in the robot
+runtime (PRD FR-4, budget in App. B.2).
 """
 
 import math
@@ -57,10 +52,8 @@ class Track:
     def _reclassify(self):
         """Promote at CONFIRM_THRESH, demote only below CAUTION_THRESH.
 
-        The middle band keeps whatever the track already was, which is the half
-        that makes this hysteresis rather than a threshold: a confirmed track
-        whose EMA dips to 0.49 stays confirmed instead of flickering back to
-        CAUTION for one frame and returning at 0.51.
+        The middle band keeping its current state is the half that makes this
+        hysteresis: a confirmed track dipping to 0.49 stays confirmed.
         """
         if self.ema_conf >= CONFIRM_THRESH:
             self._state = "CONFIRM"
@@ -76,10 +69,8 @@ class Track:
 def match_tracks(tracks, detections):
     """Greedy nearest-centroid matching. detections: list of (centroid, conf).
 
-    Returns the surviving tracks; does not modify the list it was given. It used
-    to append new tracks to the caller's list *and* return a filtered copy, so
-    whether an evicted track was really gone depended on which of the two the
-    caller looked at.
+    Returns the surviving tracks and does not modify the list it was given --
+    callers must rebind, or an evicted track stays alive in their copy.
     """
     survivors = []
     unmatched = list(range(len(detections)))
