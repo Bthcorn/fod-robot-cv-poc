@@ -16,7 +16,8 @@ Presentation write-up of the detection findings: <https://claude.ai/code/artifac
 | Median confidence | **0.534 → 0.936** | Stage H |
 | Blocking limitation | FOD-A is ~38 scenes of one object on blank concrete | Stage H |
 | Deploy artifact | `poc-v2-480` — `.hef` compiled at conf 0.10, 2,550 calibration images | Stage F |
-| Hailo INT8 vs FP32, new weights | **0.995 vs 0.995** — lossless, on the leak-free split | Stage I |
+| Hailo INT8 vs FP32, new weights | **−0.8% mAP50-95** — lossless, on the leak-free split | Stage I |
+| INT8 across all runtimes, v2 | LiteRT's −34% was mostly calibration: **−34% → −4.0%** with 5× the set | Stage I |
 | **Not yet measured** | the camera, with the new model. Every accuracy figure above is FOD-A's task | — |
 
 **The short version.** The `.hef` was never the problem and neither was the optics. Three things were: the camera's lens was parked at 1.00 m because nothing ever set `AfMode` (libcamera's default is Manual); the training set was capped at 600 images and contained **ten screws**; and FOD-A contains no cluttered scenes at all, so the model cannot abstain and answers `unknown` on furniture. Focus is fixed and costs nothing (33.38 ms against a 33.30 ms baseline). Lifting the cap to 3,000 images fixed the confidence. The third is not fixable from FOD-A — **PRD §10's own-image collection is now the critical path, not an eventual refinement.**
@@ -497,6 +498,34 @@ The *differential* is worth keeping, though, because it re-derives Stage F's arc
 
 Two protocol additions this run cost a false start each. `cpupower` is **not installed** on this board, so the governor has to be set through sysfs (`echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`) — it was sitting on `ondemand` at 1.6 GHz, which would have produced a silently wrong sweep. And a non-interactive `ssh` does not get `uv` on `PATH`; use `~/.local/bin/uv`.
 
+### The INT8 accuracy table, v2 — the LiteRT collapse was mostly calibration
+
+`runs/bench_pi/accuracy_poc-v2-480.csv`. Every exported runtime of `poc-v2-480`, scored on the shipped scene-clean 263 at imgsz 480. Measured on the Mac, because mAP does not depend on the host — the same reasoning that produced the v1 table; only `hailo` needs the board, and its cell is Stage I's.
+
+**Read mAP50-95, not mAP50.** Nearly every cell scores **0.995** on mAP50: the scene-clean split is FOD-A's easy task and `poc-v2` has effectively solved it, so mAP50 has no resolution left and reports every INT8 cell as free. That is the metric hitting its ceiling, not a finding. mAP50-95 still separates them.
+
+| Runtime | FP32 | INT8 | INT8 drop (50-95) | INT8 size |
+|---|---:|---:|---:|---:|
+| mnn | 0.852 | 0.850 | **−0.2%** | 2.81 MB |
+| **hailo** | 0.858\* | **0.851** | **−0.8%** | 7.68 MB |
+| openvino | 0.857 | 0.824 | −3.8% | 3.34 MB |
+| onnx | 0.856 | 0.805 | −6.0% | 2.99 MB |
+| litert | 0.856 | 0.730 | **−14.8%** | 3.03 MB |
+| ncnn | 0.858 | — | no INT8 path | — |
+
+\* `hailo` has no FP32 cell (INT8-only part), so it is referenced to the best FP32 backend. The FP32 band across runtimes is **0.842–0.858**, which is backend numerical noise on identical weights — Hailo's 0.851 sits inside it.
+
+**This closes the open item the v1 table left.** That section ended: *"a calibration set this small and this far from the deployment domain is a plausible cause of the LiteRT collapse, so re-run this table before concluding INT8 is dead."* Re-run with 2,550 calibration images instead of 510:
+
+| Runtime | v1 drop, 510 calib | v2 drop, 2,550 calib |
+|---|---:|---:|
+| litert | **−34%** mAP50 | **−4.0%** mAP50 |
+| onnx | −16% mAP50 | 0.0% mAP50 |
+
+The suspicion was right: **most of the LiteRT collapse was an undersized calibration set, not the runtime.** Five times the data takes it from catastrophic to merely worst-in-class. So "INT8 is dead for FR-1" no longer holds — it softens to *INT8 is viable, but not on LiteRT, and NCNN still has no INT8 path at all.* MNN and Hailo are the only genuinely lossless ones, and MNN's INT8 remains weight-only (Stage F: its latency does not move), so **Hailo is the only path where INT8 buys both size and speed.**
+
+Two limits on the comparison. The v1 drops were measured on the contaminated 90-image split and the v2 drops on the clean 263, so the direction is unambiguous but the magnitudes are not strictly comparable. And PRD §10 still calls for calibration on ~100–200 *arena* images; 2,550 FOD-A images is a larger set, not a closer one, so this table will need a third pass once real data exists.
+
 ### FOD-A is single-object-on-blank-surface photography
 
 The 0.995 is real and also nearly meaningless, and one look at the images says why. FOD-A is **one fastener, centred on a uniform concrete slab or sand**. Consecutive frames are the same object nudged between shots; different scenes are different objects on the *same* backgrounds. There is no clutter in it, no second object, no furniture, no structure — every one of the 510/2550 training images holds exactly one object (`min 1 / max 1 / mean 1.00`), because `_prepare_voc` keeps an image only `if boxes`.
@@ -506,6 +535,8 @@ So the task FOD-A poses is "find the single high-contrast object on an empty pla
 Which settles the roadmap. More FOD-A improves fastener *shape* recognition, and Stage H's screw recall proves it does. It cannot fix false positives on furniture, because FOD-A contains no furniture and cannot supply a single cluttered negative. **PRD §10's own-image collection is not the eventual refinement, it is the only fix**, and the background-image argument above matters more than the class-balance one: what is missing is not more fasteners, it is scenes.
 
 ### INT8 accuracy is already settled — and it is bad news for FR-1
+
+> **Superseded in part by the v2 table (Stage I).** Its own closing caveat turned out to be the explanation: re-run with 2,550 calibration images instead of 510, LiteRT INT8's loss goes from **−34% to −4.0%**. The verdict below on NCNN (no INT8 path) and MNN (weight-only) still stands; the verdict on LiteRT does not. Read both.
 
 mAP does not depend on the host, so the AC-2 accuracy half was measurable on the Mac without waiting for the board. Full matrix, `best.pt`, 90 val images, imgsz 640:
 
