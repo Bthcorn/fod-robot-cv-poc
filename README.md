@@ -135,6 +135,8 @@ docker --context desktop-linux run --platform linux/amd64 --rm -i \
 
 All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-negotiable details are documented at the top of `docker/hailo-compile.sh`: **Docker Desktop, not OrbStack** (OrbStack's Rosetta exposes no AVX and TensorFlow aborts on import), `-i` or the script reads EOF and exits 0 having run nothing, and **≥10 GB of VM RAM** or Layer Noise Analysis is SIGKILLed ~18 min in with no message.
 
+On Windows (Docker Desktop), the container payload is identical -- run `docker/hailo-compile.ps1` from PowerShell instead of the `docker run` line above; same `HEF_*` environment variables, no Rosetta/AVX concern since amd64 runs natively.
+
 Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it inside the emulated container. 510 images ≈ 26 min; 2,550 ≈ 86 min.
 
 `--conf` is compiled into the `.hef` and on the Pi acts as a **floor** that inference can only filter above. The matrix default is 0.001 so a benchmark row keeps its low-confidence tail and stays comparable to the host-NMS backends; a deploy build wants something usable instead. Verify the result on the board with `hailortcli parse-hef <best.hef>` — it prints the architecture, the score threshold and the class count.
