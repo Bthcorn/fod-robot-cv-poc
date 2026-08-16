@@ -11,7 +11,7 @@
 #     -v "$PWD":/work -w /work \
 #     -v "$HOME/Downloads":/wheels:ro \
 #     -v hailo-pipcache:/root/.cache/pip \
-#     python:3.10-slim bash -s < docker/hailo-compile.sh
+#     python:3.10-slim bash -s < hailo-compile/hailo-compile.sh
 #
 # Two things about that invocation are not negotiable on Apple silicon:
 #
