@@ -1,6 +1,6 @@
 # Compile best.pt -> best.hef for the Hailo-8, from Windows (Docker Desktop).
 #
-# Same payload as the Mac driver -- docker/hailo-compile.sh runs unchanged inside
+# Same payload as the Mac driver -- hailo-compile/hailo-compile.sh runs unchanged inside
 # the container, it doesn't care what host started it. This script only replaces
 # the macOS/zsh docker-run invocation documented in README.md with a PowerShell
 # equivalent: $PWD/$HOME -> $PWD.Path/$env:USERPROFILE, and `bash -s < file`
@@ -15,7 +15,7 @@
 #   $env:HEF_RUN = "poc-v2-480"; $env:HEF_DATASET = "fod-a-3k"; $env:HEF_IMGSZ = "480"; $env:HEF_CONF = "0.10"
 #   .\docker\hailo-compile.ps1
 #
-# Unset variables are left for docker/hailo-compile.sh's own ${VAR:-default} fallbacks.
+# Unset variables are left for hailo-compile/hailo-compile.sh's own ${VAR:-default} fallbacks.
 $ErrorActionPreference = "Stop"
 
 $envArgs = @()

@@ -3,7 +3,7 @@
 # Compile best.pt -> best.hef for the Hailo-8, directly on a bare Linux x86_64
 # host (WSL2 Ubuntu 22.04, or any real Linux box) -- no Docker.
 #
-# Docker in docker/hailo-compile.sh exists only to fake "Linux" for macOS,
+# Docker in hailo-compile/hailo-compile.sh exists only to fake "Linux" for macOS,
 # which has none natively. WSL2 already *is* Linux (a real kernel, not
 # emulation) and passes the Windows NVIDIA driver through to it, so a
 # container is one unneeded layer here. This is a separate script rather than
@@ -15,7 +15,7 @@
 #
 # Usage (from a WSL2 Ubuntu 22.04 shell, repo root):
 #   HEF_WHEEL=/path/to/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl \
-#   HEF_GPU=1 ./docker/hailo-compile-wsl.sh
+#   HEF_GPU=1 ./hailo-compile/hailo-compile-wsl.sh
 #
 # HEF_WHEEL: if unset, tried in order:
 #   $HOME/Downloads/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
@@ -65,13 +65,13 @@ export PIP_RETRIES=10 PIP_DEFAULT_TIMEOUT=60
 
 pip install "$HEF_WHEEL"
 
-# CPU torch, explicitly -- see docker/hailo-compile.sh for why.
+# CPU torch, explicitly -- see hailo-compile/hailo-compile.sh for why.
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 
-# numpy pinned -- see docker/hailo-compile.sh for why.
+# numpy pinned -- see hailo-compile/hailo-compile.sh for why.
 pip install "numpy==1.26.4" "ultralytics>=8.4.115" onnx onnxslim onnxruntime
 
-# --no-deps/--ignore-requires-python -- see docker/hailo-compile.sh for why.
+# --no-deps/--ignore-requires-python -- see hailo-compile/hailo-compile.sh for why.
 pip install --no-deps --ignore-requires-python -e .
 
 python -c "import hailo_sdk_client, tensorflow, numpy; print('DFC ok', numpy.__version__)"
@@ -88,7 +88,7 @@ if [ "${HEF_GPU:-0}" = "1" ]; then
   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
 fi
 
-# Same env-var-driven invocation as docker/hailo-compile.sh.
+# Same env-var-driven invocation as hailo-compile/hailo-compile.sh.
 fodcv-export \
   --run "${HEF_RUN:-poc-v1-480}" \
   --dataset "${HEF_DATASET:-fod-a}" \
