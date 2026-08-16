@@ -18,12 +18,19 @@
 #   HEF_GPU=1 ./hailo-compile/hailo-compile-wsl.sh
 #
 # HEF_WHEEL: if unset, tried in order:
+#   $HOME/.cache/hailo-compile/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
 #   $HOME/Downloads/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
 #   /mnt/c/Users/$USER/Downloads/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
-# The second guesses the WSL username equals the Windows one, which isn't
-# always true -- copy the wheel into WSL's own filesystem (the first path,
+# and, if none exist and HEF_WHEEL_URL points at a mirror of the wheel,
+# downloaded once into the first of those and checked against HEF_WHEEL_SHA256
+# (defaulting to the 3.34.0 wheel this project was built on) before install.
+# No mirror URL is committed: the DFC is proprietary and gated behind the Hailo
+# Developer Zone login, and this repo is public.
+# The third path guesses the WSL username equals the Windows one, which isn't
+# always true -- copy the wheel into WSL's own filesystem (the second path,
 # also faster to pip-install than across the /mnt/c 9p boundary) or set
-# HEF_WHEEL directly if it doesn't match.
+# HEF_WHEEL directly if it doesn't match. Set explicitly to a path that does
+# not exist, it fails rather than downloading: an explicit path is intent.
 #
 # HEF_GPU=1: run the quantization-aware fine-tuning step (four epochs, the
 # slow part -- 26-86 min CPU-only) on the NVIDIA GPU via WSL2's CUDA
@@ -41,21 +48,43 @@
 # if venv creation and pip installs feel sluggish.
 set -euxo pipefail
 
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential libgl1 libglib2.0-0 graphviz python3.10-venv curl ca-certificates
+
+# Wheel resolution runs after apt because the fallback needs curl.
+# Same block as hailo-compile/hailo-compile.sh -- see there for why it is copied.
 WHEEL_NAME=hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
+WHEEL_CACHE="$HOME/.cache/hailo-compile/$WHEEL_NAME"
+WHEEL_SHA256="${HEF_WHEEL_SHA256:-f539ebb5997149ec68ca443a547196a03d28c624fbb072fdcd22a7d37fad9fb1}"
 if [ -z "${HEF_WHEEL:-}" ]; then
-  for candidate in "$HOME/Downloads/$WHEEL_NAME" "/mnt/c/Users/$USER/Downloads/$WHEEL_NAME"; do
+  for candidate in "$WHEEL_CACHE" "$HOME/Downloads/$WHEEL_NAME" "/mnt/c/Users/$USER/Downloads/$WHEEL_NAME"; do
     [ -f "$candidate" ] && HEF_WHEEL="$candidate" && break
   done
 fi
-if [ -z "${HEF_WHEEL:-}" ] || [ ! -f "$HEF_WHEEL" ]; then
-  echo "HEF_WHEEL not found. Set it to the path of the DFC wheel" \
-       "(download from the Hailo Developer Zone)." >&2
+if [ -z "${HEF_WHEEL:-}" ]; then
+  if [ -z "${HEF_WHEEL_URL:-}" ]; then
+    echo "No $WHEEL_NAME in any of the searched paths and HEF_WHEEL_URL is unset." \
+         "Download the DFC wheel from the Hailo Developer Zone and set HEF_WHEEL" \
+         "to it, or set HEF_WHEEL_URL to your own mirror of it." >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$WHEEL_CACHE")"
+  # Download to .part and rename, so a killed transfer is not cached as a wheel.
+  curl -fL --retry 5 -C - -o "$WHEEL_CACHE.part" "$HEF_WHEEL_URL"
+  if ! echo "$WHEEL_SHA256  $WHEEL_CACHE.part" | sha256sum -c -; then
+    rm -f "$WHEEL_CACHE.part"
+    echo "Downloaded wheel does not match $WHEEL_SHA256. Set HEF_WHEEL_SHA256 if" \
+         "your mirror holds a different DFC build." >&2
+    exit 1
+  fi
+  mv "$WHEEL_CACHE.part" "$WHEEL_CACHE"
+  HEF_WHEEL="$WHEEL_CACHE"
+fi
+if [ ! -f "$HEF_WHEEL" ]; then
+  echo "HEF_WHEEL=$HEF_WHEEL does not exist." >&2
   exit 1
 fi
-
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-  build-essential libgl1 libglib2.0-0 graphviz python3.10-venv
 
 VENV="${HEF_VENV:-$HOME/.cache/hailo-compile-venv}"
 python3.10 -m venv "$VENV"

@@ -19,7 +19,7 @@
 $ErrorActionPreference = "Stop"
 
 $envArgs = @()
-foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF") {
+foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF", "HEF_WHEEL_URL", "HEF_WHEEL_SHA256") {
     $value = [Environment]::GetEnvironmentVariable($name)
     if ($value) { $envArgs += "-e"; $envArgs += "$name=$value" }
 }
