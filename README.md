@@ -133,6 +133,8 @@ docker --context desktop-linux run --platform linux/amd64 --rm -i \
   python:3.10-slim bash -s < hailo-compile/hailo-compile.sh
 ```
 
+The Dataflow Compiler wheel is taken from the mounted `Downloads` folder when it's there. Hailo's Developer Zone is login-gated, so nothing can fetch it automatically — set `HEF_WHEEL_URL` to your own mirror and the scripts download it once and cache it (the pip-cache volume under Docker, `~/.cache/hailo-compile/` under WSL2), verified against `HEF_WHEEL_SHA256`, which defaults to the sha256 of the 3.34.0 wheel these results were built with. A mismatch aborts before install. No mirror URL is committed: the DFC is proprietary and this repo is public.
+
 All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-negotiable details are documented at the top of `hailo-compile/hailo-compile.sh`: **Docker Desktop, not OrbStack** (OrbStack's Rosetta exposes no AVX and TensorFlow aborts on import), `-i` or the script reads EOF and exits 0 having run nothing, and **≥10 GB of VM RAM** or Layer Noise Analysis is SIGKILLed ~18 min in with no message.
 
 Windows options, same `HEF_*` variables both ways:

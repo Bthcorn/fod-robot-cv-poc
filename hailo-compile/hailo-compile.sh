@@ -2,10 +2,17 @@
 #
 # Compile best.pt -> best.hef for the Hailo-8, inside an amd64 container.
 #
-# The Hailo Dataflow Compiler is x86_64-Linux-only and is not on PyPI or apt --
-# download the wheel from the Hailo Developer Zone (login required) and put it
-# somewhere this script can mount. There is no aarch64 or macOS build, so the Pi
-# cannot compile its own .hef and neither can the Mac natively.
+# The Hailo Dataflow Compiler is x86_64-Linux-only and is not on PyPI or apt.
+# There is no aarch64 or macOS build, so the Pi cannot compile its own .hef and
+# neither can the Mac natively.
+#
+# The wheel is taken from /wheels (the host Downloads folder, mounted read-only)
+# when it is there. The Developer Zone is behind a login, so there is no URL to
+# fall back to by default -- point HEF_WHEEL_URL at your own mirror and the
+# wheel is fetched once into the pip cache volume, checked against
+# HEF_WHEEL_SHA256 (defaulting to the 3.34.0 wheel this project was built on)
+# before it is installed. No mirror URL is committed here: the DFC is
+# proprietary and gated, and this repo is public.
 #
 #   docker --context desktop-linux run --platform linux/amd64 --rm -i \
 #     -v "$PWD":/work -w /work \
@@ -41,9 +48,39 @@ export PIP_RETRIES=10 PIP_DEFAULT_TIMEOUT=60
 export USER=root
 
 apt-get update
-apt-get install -y --no-install-recommends build-essential libgl1 libglib2.0-0 graphviz
+apt-get install -y --no-install-recommends build-essential libgl1 libglib2.0-0 graphviz curl ca-certificates
 
-pip install /wheels/hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
+# /wheels is read-only, so the mirror lands in /root/.cache/pip -- the
+# hailo-pipcache volume, writable and already persisted across runs, so the
+# 524 MB is fetched once. Duplicated in hailo-compile/hailo-compile-wsl.sh:
+# this script arrives on docker's stdin via `bash -s` and cannot source a
+# sibling file.
+WHEEL_NAME=hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
+WHEEL_SHA256="${HEF_WHEEL_SHA256:-f539ebb5997149ec68ca443a547196a03d28c624fbb072fdcd22a7d37fad9fb1}"
+WHEEL="/wheels/$WHEEL_NAME"
+if [ ! -f "$WHEEL" ]; then
+  WHEEL="/root/.cache/pip/$WHEEL_NAME"
+  mkdir -p "$(dirname "$WHEEL")"
+fi
+if [ ! -f "$WHEEL" ]; then
+  if [ -z "${HEF_WHEEL_URL:-}" ]; then
+    echo "No wheel at /wheels/$WHEEL_NAME and HEF_WHEEL_URL is unset. Download" \
+         "the DFC wheel from the Hailo Developer Zone into the host folder" \
+         "mounted at /wheels, or set HEF_WHEEL_URL to your own mirror of it." >&2
+    exit 1
+  fi
+  # Download to .part and rename, so a killed transfer is not cached as a wheel.
+  curl -fL --retry 5 -C - -o "$WHEEL.part" "$HEF_WHEEL_URL"
+  if ! echo "$WHEEL_SHA256  $WHEEL.part" | sha256sum -c -; then
+    rm -f "$WHEEL.part"
+    echo "Downloaded wheel does not match $WHEEL_SHA256. Set HEF_WHEEL_SHA256 if" \
+         "your mirror holds a different DFC build." >&2
+    exit 1
+  fi
+  mv "$WHEEL.part" "$WHEEL"
+fi
+
+pip install "$WHEEL"
 
 # CPU torch, explicitly. On Linux x86_64 the default PyPI torch is the CUDA build
 # and drags in ~1.7 GB of nvidia_*/triton wheels for a GPU this container does
