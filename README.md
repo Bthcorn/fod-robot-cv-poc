@@ -135,7 +135,10 @@ docker --context desktop-linux run --platform linux/amd64 --rm -i \
 
 All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-negotiable details are documented at the top of `docker/hailo-compile.sh`: **Docker Desktop, not OrbStack** (OrbStack's Rosetta exposes no AVX and TensorFlow aborts on import), `-i` or the script reads EOF and exits 0 having run nothing, and **≥10 GB of VM RAM** or Layer Noise Analysis is SIGKILLed ~18 min in with no message.
 
-On Windows (Docker Desktop), the container payload is identical -- run `docker/hailo-compile.ps1` from PowerShell instead of the `docker run` line above; same `HEF_*` environment variables, no Rosetta/AVX concern since amd64 runs natively.
+Windows options, same `HEF_*` variables both ways:
+
+- **Docker** (`docker/hailo-compile.ps1`) -- identical container payload, PowerShell syntax. No Rosetta/AVX concern, amd64 runs natively.
+- **WSL2, no Docker** (`docker/hailo-compile-wsl.ps1` / `.sh`) -- installs the DFC wheel into a persistent WSL2 venv, one less layer than Docker. `HEF_GPU=1` runs the fine-tuning step on an NVIDIA GPU via WSL2's CUDA passthrough (needs the NVIDIA WSL-CUDA driver on the Windows host, nothing inside WSL). Script confirms with `tf.config.list_physical_devices('GPU')`. Unverified: whether DFC 3.34.0's TF pin has matching `tensorflow[and-cuda]` wheels -- wheel's gated, couldn't check.
 
 Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it inside the emulated container. 510 images ≈ 26 min; 2,550 ≈ 86 min.
 
