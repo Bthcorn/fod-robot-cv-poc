@@ -77,6 +77,10 @@ SOURCES: dict[str, VocSource | YoloSource] = {
 # mAP already recorded is against fod-a's 90 images.
 SOURCES["fod-a-3k"] = replace(SOURCES["fod-a"], subset_size=3000)
 
+# All 9,623 mapped-box images -- the "does more data help" comparison against
+# fod-a-3k, run on a machine faster than the ~7.5 h MPS estimate above.
+SOURCES["fod-a-full"] = replace(SOURCES["fod-a"], subset_size=None)
+
 
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:
     known = ", ".join(sorted(SOURCES))

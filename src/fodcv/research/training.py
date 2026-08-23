@@ -10,12 +10,22 @@ Output is Ultralytics scratch in `runs/train_<dataset>[_aug]/`, not the deploy
 unit -- publish it with `fodcv-migrate --from <that dir>`.
 """
 
+import torch
 from ultralytics import YOLO
 
 from fodcv.paths import CURRENT_DATASET, ROOT, dataset_yaml
 
 # v2 angle-robustness knobs -- 0/default in v1.
 ANGLE_AUG_HYP = dict(degrees=15, shear=8, perspective=0.0008, scale=0.6)
+
+
+def _device() -> str:
+    """CUDA on WSL2/Linux boxes with an NVIDIA GPU, MPS on the Mac, else CPU."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def run(angle_aug: bool = False, dataset: str = CURRENT_DATASET):
@@ -31,7 +41,7 @@ def run(angle_aug: bool = False, dataset: str = CURRENT_DATASET):
         data=str(data_yaml),
         imgsz=640,
         epochs=15,
-        device="mps",
+        device=_device(),
         project=str(ROOT / "runs"),
         name=run_name,
         exist_ok=True,
