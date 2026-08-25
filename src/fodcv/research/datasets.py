@@ -18,6 +18,18 @@ from pathlib import Path
 
 from fodcv.paths import CURRENT_DATASET
 
+# The 263 scene-disjoint images artifacts/poc-v2-480/eval/ scores against. Never
+# a training candidate, for any dataset here -- see _prepare_voc.
+#
+# Names, not images, because artifacts/ is gitignored: the CUDA box has this file
+# and not the pictures, so a dataset that trains on them is unscoreable there
+# with no local symptom. 250 scenes, and those scenes hold these 263 images and
+# nothing else, so dropping them removes the whole neighbourhood, not just the
+# frames.
+HOLDOUT_STEMS = frozenset(
+    (Path(__file__).parent / "fod_a_holdout.txt").read_text().split()
+)
+
 
 @dataclass(frozen=True)
 class VocSource:

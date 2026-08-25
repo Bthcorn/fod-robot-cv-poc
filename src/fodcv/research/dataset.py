@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 
 from fodcv.paths import CURRENT_DATASET, DATA_DIR, dataset_dir, dataset_yaml
-from fodcv.research.datasets import SOURCES, VocSource, YoloSource, source
+from fodcv.research.datasets import HOLDOUT_STEMS, SOURCES, VocSource, YoloSource, source
 
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 
@@ -159,13 +159,19 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
 
     candidates = []
     class_counts = {cid: 0 for cid in src.class_names}
-    for xml_path in ann_dir.glob("*.xml"):
+    # sorted, not bare glob: the split shuffles this list, so filesystem order
+    # would hand the Mac and the CUDA box different train/val splits from the
+    # same seed -- which is exactly what `seed` is documented to prevent.
+    for xml_path in sorted(ann_dir.glob("*.xml")):
+        if xml_path.stem in HOLDOUT_STEMS:
+            continue  # scored against, so never trained on -- unconditional
         boxes = fastener_boxes(xml_path, src.class_map)
         if boxes:
             candidates.append((xml_path.stem, boxes))
             for class_id, *_ in boxes:
                 class_counts[class_id] += 1
 
+    print(f"holdout images withheld: {len(HOLDOUT_STEMS)}")
     print(f"images with a mapped box: {len(candidates)}")
     print(f"box counts by class: {[(src.class_names[cid], n) for cid, n in sorted(class_counts.items())]}")
 

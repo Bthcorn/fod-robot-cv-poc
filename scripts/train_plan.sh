@@ -65,7 +65,26 @@ train() {  # train <name> <dataset> <weights> [--set k=v ...]
     --set "epochs=$EPOCHS" --set "patience=$PATIENCE" --set "batch=$BATCH" "$@"
 }
 
-prepare() { [[ -d "data/$1" ]] || uv run fodcv-prepare --dataset "$1"; }
+# Re-prepares a dataset that already exists if it holds scoring images. Datasets
+# built before the holdout was withheld look complete and are unscoreable, and
+# the only symptom is a mAP that is too good -- so the check is here rather than
+# in a line of the README nobody rereads.
+prepare() {
+  if [[ -d "data/$1" ]]; then
+    uv run python -c "
+import sys
+from pathlib import Path
+from fodcv.research.datasets import HOLDOUT_STEMS
+train = {p.stem for p in Path('data/$1/images/train').iterdir()}
+leaked = train & HOLDOUT_STEMS
+if leaked:
+    print(f'$1 trains on {len(leaked)} holdout images -- rebuilding')
+    sys.exit(1)
+" && return
+    rm -rf "data/$1"
+  fi
+  uv run fodcv-prepare --dataset "$1"
+}
 
 # ---------------------------------------------------------------- datasets
 # Same source zip, cached after the first. fod-a-7 and fod-a-1 are the same

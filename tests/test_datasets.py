@@ -2,7 +2,8 @@ import pytest
 
 from fodcv.paths import CURRENT_DATASET
 from fodcv.research import dataset
-from fodcv.research.datasets import SOURCES, VocSource, YoloSource, class_names, source
+from fodcv.research.datasets import (HOLDOUT_STEMS, SOURCES, VocSource, YoloSource,
+                                     class_names, source)
 
 
 def test_the_default_dataset_is_registered():
@@ -152,3 +153,43 @@ def test_fod_a_1_collapses_every_fastener_onto_one_id():
     assert set(one.class_map) == set(source("fod-a").class_map)
     assert one.class_names == {0: "metal_fastener"}
     assert {cid for _, cid in one.class_map.values()} == {0}
+
+
+def test_the_holdout_list_matches_the_split_that_ships_with_the_run():
+    """The names travel in the package because artifacts/ is gitignored -- the
+    CUDA box has this file and not the images. If they drift, a dataset excludes
+    the wrong frames and the leak comes back silently."""
+    from fodcv.paths import HOLDOUT_DIR
+
+    shipped = HOLDOUT_DIR / "images" / "val"
+    if not shipped.exists():
+        pytest.skip("holdout images are Mac-side only")
+    assert {p.stem for p in shipped.iterdir()} == set(HOLDOUT_STEMS)
+
+
+def test_no_holdout_image_reaches_any_train_split():
+    """The regression test for the leak that killed phase A run 1.
+
+    Not a check on the flag -- a replay of the real candidate build and the real
+    split against the real annotations, because the bug was never in the flag.
+    It was that `subset_size=None` silently swallows the pool the holdout was
+    carved from, and nothing in the training output says so.
+    """
+    from pathlib import Path
+
+    from fodcv.research.dataset import fastener_boxes, split
+
+    ann = Path("data/fod-a-voc/FODPascalVOCFormat-V.2.1/VOC2007/Annotations")
+    if not ann.exists():
+        pytest.skip("FOD-A VOC not downloaded")
+
+    for name, src in SOURCES.items():
+        if not isinstance(src, VocSource):
+            continue
+        stems = [x.stem for x in sorted(ann.glob("*.xml")) if x.stem not in HOLDOUT_STEMS]
+        cands = [(s, b) for s in stems
+                 if (b := fastener_boxes(ann / f"{s}.xml", src.class_map))]
+        parts = split(cands, src.val_fraction, src.seed, src.subset_size)
+        for part in ("train", "val"):
+            leaked = {s for s, _ in parts[part]} & set(HOLDOUT_STEMS)
+            assert not leaked, f"{name} {part} contains {len(leaked)} holdout images"
