@@ -8,8 +8,11 @@
 #   bash scripts/train_plan.sh A B        # only those phases
 #   EPOCHS=30 bash scripts/train_plan.sh  # cheaper pass
 #
-# Resumable: a run whose weights/best.pt already exists is skipped, so a crash
-# or a Ctrl-C costs you the current run and nothing before it.
+# Resumable: a run is skipped once results.csv holds EPOCHS rows, so a crash or
+# a Ctrl-C costs you the current run and nothing before it. Deliberately not
+# best.pt -- Ultralytics writes that from epoch 1, so a run that died at epoch 3
+# would look finished and be skipped forever. An interrupted run restarts from
+# scratch rather than resuming; a partial LR schedule is not worth the plumbing.
 #
 # WHAT THIS DOES NOT DO: rank the runs. Every mAP printed here is against the
 # training dataset's own val split, which for FOD-A is near-duplicate
@@ -48,10 +51,16 @@ want() { [[ " $phases " == *" $1 "* ]]; }
 
 train() {  # train <name> <dataset> <weights> [--set k=v ...]
   local name=$1 dataset=$2 weights=$3; shift 3
-  if [[ -f "runs/$name/weights/best.pt" ]]; then
-    echo "== skip $name (already trained)"; return
+  local done=0
+  [[ -f "runs/$name/results.csv" ]] && done=$(( $(grep -c '' "runs/$name/results.csv") - 1 ))
+  if (( done >= EPOCHS )); then
+    echo "== skip $name ($done epochs already)"; return
   fi
-  echo "== $name"
+  if (( done > 0 )); then
+    echo "== $name (restarting, only $done of $EPOCHS epochs on disk)"
+  else
+    echo "== $name"
+  fi
   uv run fodcv-train --dataset "$dataset" --model "$weights" --name "$name" \
     --set "epochs=$EPOCHS" --set "patience=$PATIENCE" --set "batch=$BATCH" "$@"
 }
@@ -145,6 +154,23 @@ if want D; then
 fi
 
 cat <<'DONE'
+
+Four axes this plan does NOT cover, in the order they are worth adding:
+
+  1. Negative images. No run here touches the false-positive problem, because
+     FOD-A cannot: it has no furniture, no clutter, no empty floor. ~200
+     unlabelled background frames from the Pi is the cheapest fix in the whole
+     project, and it needs a shoot, not a flag.
+  2. Photometric and motion augmentation. hsv_* and a blur are arguably closer
+     to deployment than perspective is -- fasteners are specular, arena lighting
+     is not FOD-A's, and a robot at 30 fps produces motion blur that no training
+     image contains. Untested here.
+  3. INT8 survival. Every run is ranked in FP32; the robot runs INT8 on a
+     Hailo. A config can win here and lose after quantization. Export the
+     winner and re-score before committing to it.
+  4. Interactions. One axis at a time by design -- the eval split cannot
+     resolve a cross-product -- so phase D is where any of this gets combined,
+     by hand, after the single-axis results are in.
 
 Done. Next, and not optional:
   1. Score every run on the scene-clean holdout, class-agnostic. The per-run
