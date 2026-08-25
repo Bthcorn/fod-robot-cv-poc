@@ -81,6 +81,34 @@ SOURCES["fod-a-3k"] = replace(SOURCES["fod-a"], subset_size=3000)
 # fod-a-3k, run on a machine faster than the ~7.5 h MPS estimate above.
 SOURCES["fod-a-full"] = replace(SOURCES["fod-a"], subset_size=None)
 
+# fod-a's seven categories told apart instead of merged: ids 0-2 hold, and
+# `unknown` splits into the four it hid. Same categories means the same images
+# and, at this seed, the same val split -- so the mAP reads against fod-a-full.
+SOURCES["fod-a-7"] = replace(
+    SOURCES["fod-a"],
+    class_map={
+        "Nail": ("nail", 0),
+        "Screw": ("screw", 1),
+        "Bolt": ("bolt", 2),
+        "Washer": ("washer", 3),
+        "Nut": ("nut", 4),
+        "BoltWasher": ("boltwasher", 5),
+        "BoltNutSet": ("boltnutset", 6),
+    },
+    subset_size=None,
+)
+
+# The same seven collapsed into one, because PICK does not depend on which
+# fastener it is. Kills both standing problems: Screw's 157 instances stop being
+# a rare class, and Bolt/BoltWasher/BoltNutSet stop being a call that can be got
+# wrong. Gives up the type in a REPORT -- that returns as a second stage, if ever.
+SOURCES["fod-a-1"] = replace(
+    SOURCES["fod-a"],
+    class_map={name: ("metal_fastener", 0) for name in
+               ("Nail", "Screw", "Bolt", "Washer", "Nut", "BoltWasher", "BoltNutSet")},
+    subset_size=None,
+)
+
 
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:
     known = ", ".join(sorted(SOURCES))

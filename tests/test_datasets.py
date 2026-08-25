@@ -128,3 +128,27 @@ def test_prepared_yolo_dataset_is_split_and_yaml_written(registered):
         images = list((registered / "scratch-a" / "images" / name).glob("*.jpg"))
         labels = list((registered / "scratch-a" / "labels" / name).glob("*.txt"))
         assert len(images) == len(labels) == 2
+
+
+def test_fod_a_7_splits_the_unknown_bucket_without_changing_the_image_set():
+    """Same categories on both sides is the point: prepare keeps an image if it
+    has any mapped box, so the candidate set and val split are unchanged and only
+    the labels get finer -- which is what makes the two mAPs comparable."""
+    four, seven = source("fod-a"), source("fod-a-7")
+    assert set(four.class_map) == set(seven.class_map)
+    assert len(seven.class_names) == 7
+    # Ids 0-2 hold still so the fastener classes stay readable across runs.
+    assert [seven.class_names[i] for i in range(3)] == ["nail", "screw", "bolt"]
+    merged = {name for name, (mapped, _) in four.class_map.items() if mapped == "unknown"}
+    assert {seven.class_map[name][0] for name in merged} == {
+        "washer", "nut", "boltwasher", "boltnutset"}
+
+
+def test_fod_a_1_collapses_every_fastener_onto_one_id():
+    """One class, so nothing to confuse and nothing rare. Same seven categories
+    as fod-a and fod-a-7, so all three score the same val images -- a labelling
+    choice over one fixed image set, which is why their mAPs read together."""
+    one = source("fod-a-1")
+    assert set(one.class_map) == set(source("fod-a").class_map)
+    assert one.class_names == {0: "metal_fastener"}
+    assert {cid for _, cid in one.class_map.values()} == {0}
