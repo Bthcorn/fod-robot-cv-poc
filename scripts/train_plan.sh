@@ -19,8 +19,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-EPOCHS=${EPOCHS:-60}      # 15 was an MPS budget, not convergence. patience stops it early.
-PATIENCE=${PATIENCE:-20}
+EPOCHS=${EPOCHS:-60}      # 15 was an MPS budget, not convergence: train losses were
+                          # still falling steeply at 15 and val/dfl_loss with them.
+                          # It also fixes an accident -- close_mosaic=10 out of 15
+                          # epochs left the old run mosaic-free for two thirds of
+                          # training. At 60 that is 50 epochs with mosaic on.
+PATIENCE=${PATIENCE:-0}   # 0 disables early stopping, and that is deliberate. A stop
+                          # before epoch (EPOCHS - close_mosaic) = 50 means mosaic
+                          # never closes and the LR never finishes annealing, so the
+                          # run is cut off before its two best phases. Any patience
+                          # you set must exceed 50, which is most of the run anyway.
 BATCH=${BATCH:-16}        # fixed across every run, or the comparison is confounded.
                           # Raise it once here for a bigger card, never per run.
 BASE=fod-a-full           # all 9,623 mapped-box images. 4-class scheme.
