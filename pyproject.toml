@@ -43,6 +43,7 @@ bench = [
 fodcv-prepare = "fodcv.cli.prepare_dataset:main"
 fodcv-smoke = "fodcv.cli.smoke_test:main"
 fodcv-train = "fodcv.cli.train:main"
+fodcv-eval = "fodcv.cli.eval:main"
 fodcv-migrate = "fodcv.cli.migrate_artifacts:main"
 fodcv-export = "fodcv.cli.export:main"
 # Pi side.

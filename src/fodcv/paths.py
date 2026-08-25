@@ -27,6 +27,13 @@ CURRENT_DATASET = "fod-a"
 
 STOCK_WEIGHTS = "yolo11n.pt"
 
+# The only scene-disjoint holdout in artifacts/: 263 images from 250 FOD-A scenes
+# that contributed no training frame to poc-v1 or poc-v2. Every other run's eval/
+# is that dataset's own val split, 74% near-duplicates of its train split, so a
+# score against one of those measures memorisation. It sits under poc-v2-480
+# because that is the run that shipped it, not because it belongs to that run.
+HOLDOUT_DIR = ARTIFACTS_DIR / "poc-v2-480" / "eval"
+
 
 def dataset_dir(dataset: str = CURRENT_DATASET) -> Path:
     return DATA_DIR / dataset
