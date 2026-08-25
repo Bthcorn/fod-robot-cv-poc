@@ -97,8 +97,22 @@ fi
 #
 # perspective is in 1/pixel on coords centred at +/-W/2, so the tilt it draws
 # depends on canvas width: on the 2x mosaic canvas it is twice the strength of
-# the post-close_mosaic epochs. 0.0008 draws ~14 deg typical / 27 deg max on the
-# plain path, ~27/46 on the mosaic path. Target band is 10-25 deg (RESULT.md §8).
+# the post-close_mosaic epochs. Solving w = 1 + sin(theta)/f * y for a 66 deg
+# lens gives what each value actually draws (max / typical, uniform draw):
+#
+#     p        plain 640        mosaic 1280     labels past the horizon
+#   0.0004   11 deg /  6 deg   23 deg / 11 deg      none
+#   0.0008   23 deg / 11 deg   52 deg / 23 deg      none
+#   0.0010   30 deg / 14 deg   80 deg / 30 deg      none
+#   0.0016   52 deg / 23 deg   past 90 deg          0.2%
+#
+# What it has to cover: the robot does not view the floor at its mount tilt, it
+# views it at the object's depression angle. A 40 mm fastener at FOD-A's
+# training scale sits 0.28 m out (RESULT.md §6), so a 15-20 cm mount sees the
+# ground plane 45-58 deg off-normal, against FOD-A's near-nadir. That is the
+# gap -- much wider than the 10-25 deg of §8, which is the optical axis, not
+# the object. Only the mosaic path reaches it, and 0.0010 is the ceiling:
+# past it w goes negative, points reproject mirrored, and labels follow them.
 #
 # DO NOT score these on a warped copy of the holdout: warping with the same
 # homography family you trained on measures self-consistency, not viewpoint
@@ -106,11 +120,11 @@ fi
 # 0/10/20/30 deg, ~50 frames each. Half an hour, and the only honest referee.
 if want C; then
   train plan-c1-persp-low  "$BASE" yolo11n.pt --set seed=0 \
-    --set perspective=0.0004 --set degrees=5 --set shear=8   # ~7 deg typical
+    --set perspective=0.0004 --set degrees=5 --set shear=8   # mild, tops out at 23 deg
   train plan-c2-persp-mid  "$BASE" yolo11n.pt --set seed=0 \
     --set perspective=0.0008 --set degrees=5 --set shear=8   # the v2 value, unbundled
   train plan-c3-persp-high "$BASE" yolo11n.pt --set seed=0 \
-    --set perspective=0.0016 --set degrees=5 --set shear=8   # past the band, to find the edge
+    --set perspective=0.0010 --set degrees=5 --set shear=8   # the ceiling, 80 deg max draw
 fi
 
 # ------------------------------------------------------------------ D: combine
