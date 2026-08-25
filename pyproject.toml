@@ -1,18 +1,28 @@
 [project]
-name = "cv-poc"
+name = "fod-vision"
 version = "0.1.0"
-description = "FOD robot computer-vision proof of concept: dataset prep, fine-tuning, runtime export, and on-device benchmarking"
+description = "FOD robot vision: dataset prep, fine-tuning, runtime export, on-device benchmarking, and the runtime the robot imports"
 readme = "README.md"
-requires-python = ">=3.12"
+# 3.11, not 3.12: the Pi runs fodcv.runtime on its *system* interpreter, which
+# Bookworm pins at 3.11 because apt's picamera2 is built against it.
+requires-python = ">=3.11"
 
-# Both hosts. Everything needed to load a model and run inference.
+# What `fodcv.runtime` needs, and nothing else. The robot repo installs this into
+# the Pi's system python3.11 and must not get torch with it -- ultralytics lives in
+# the `research` extra for exactly that reason. Both are already present on the Pi
+# via apt's python3-opencv/python3-numpy, so this install adds almost nothing.
 dependencies = [
+    "numpy>=1.26",
     "opencv-python>=5.0.0.93",
-    "pyyaml>=6.0",
-    "ultralytics>=8.4.115",
 ]
 
 [project.optional-dependencies]
+# Everything Mac-side: training, dataset prep, export, and the Pi benchmark, all of
+# which drive Ultralytics. Nothing under fodcv/runtime/ imports either of these.
+research = [
+    "pyyaml>=6.0",
+    "ultralytics>=8.4.115",
+]
 # The Mac-side toolchain. Mostly converters, and none of those install on the
 # Pi -- litert-torch ships no aarch64 wheel and coremltools is Apple-only --
 # which is why export happens off-Pi and the artifacts are rsynced over. gdown

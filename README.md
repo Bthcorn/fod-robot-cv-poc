@@ -96,13 +96,29 @@ Every command is a console script installed by `uv sync`. Names map one-to-one o
 |---|---|---|
 | `fodcv-prepare` | `cli/prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
 | `fodcv-smoke` | `cli/smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
-| `fodcv-train` | `cli/train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/`. `--angle-aug` adds viewpoint-robustness augmentation and writes to a separate run dir. |
+| `fodcv-train` | `cli/train.py` | Fine-tunes `--model` (default `yolo11n.pt`) on `--dataset` → `runs/train_<dataset>[_aug]/`, or `--name` when sweeping. CUDA/MPS/CPU auto-detected. `--set key=value` passes any Ultralytics train argument through (`--set epochs=60 --set imgsz=480 --set seed=1`). `--angle-aug` adds viewpoint-robustness augmentation and writes to a separate run dir. |
 | `fodcv-migrate` | `cli/migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
 | `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi.** `--conf` sets the score threshold compiled into a Hailo `.hef`; ignored by every other format, which take `conf=` at call time. |
 | `fodcv-bench` | `cli/bench_pi.py` | Runtime/precision benchmark, run **on the Pi 5**. Median + p95 latency, FPS, size and mAP per `{model} × {format} × {precision}`, plus the board conditions published benchmarks omit. `--soak N` runs sustained load instead of the matrix; `--no-val` skips mAP. |
 | `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test, Mac-only stand-in for the Pi's real camera. |
 | `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices. |
 | `fodcv-policy` | `cli/confidence_policy.py` | Confidence hysteresis + multi-frame EMA smoothing demo. |
+
+### Sweeping
+
+`scripts/train_plan.sh` is the training plan and its runner in one file: the
+question each run answers sits next to the command that produces it. Ordered by
+payoff, resumable (a run with a `best.pt` is skipped), phase-selectable.
+
+```
+bash scripts/train_plan.sh            # every phase, in order
+bash scripts/train_plan.sh A B        # just those
+EPOCHS=30 bash scripts/train_plan.sh  # cheaper pass
+```
+
+It produces candidates, it does not rank them. Every mAP it prints is against
+the training dataset's own val split, which for FOD-A is near-duplicate
+contaminated -- see RESULT.md §7, and score on the scene-clean holdout instead.
 
 `pi/camera_hailo.py` is not a console script — it runs on the Pi with the **system** interpreter (see below).
 
