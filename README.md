@@ -7,7 +7,8 @@ De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot P
 ## Layout
 
 ```
-src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only,
+src/fodcv/          the package. runtime/ is what the robot imports, research/ is
+                    Mac-only,
                     bench/ measures, the top level is shared.
 src/fodcv/cli/      one module per command: argparse, then the call into the
                     package module that does the work. The two camera helpers
@@ -27,11 +28,13 @@ Two ids, same shape. A **run-id** names one trained model, a **dataset-id** name
 ## Setup
 
 ```
-uv sync --extra export --extra bench   # Mac: converters + runtimes
-uv sync --extra bench                  # Pi: runtimes only
+uv sync --extra research --extra export --extra bench   # Mac: everything
+uv sync --extra research --extra bench                  # Pi: benchmark runtimes
 ```
 
 The Mac-only converters (`coremltools`, `litert-torch`, `nncf`, `pnnx`) are in the `export` extra because they do not install on aarch64 at all.
+
+`ultralytics` is in the **`research`** extra, not the base dependencies, so that base is `numpy` + `opencv-python` — see [The robot's interface](#the-robots-interface). Every command above the benchmark needs it, so add `--extra research` to anything that is not the robot.
 
 ```
 uv run pytest
@@ -122,6 +125,41 @@ contaminated -- see RESULT.md §7, and score on the scene-clean holdout instead.
 
 `pi/camera_hailo.py` is not a console script — it runs on the Pi with the **system** interpreter (see below).
 
+## The robot's interface
+
+The robot lives in its own repo and imports this one. What it gets is one class:
+
+```python
+from fodcv.runtime.vision import Vision
+
+with Vision(hef="artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef") as vision:
+    while patrolling:
+        if vision.age > 0.5:
+            halt("vision stalled")
+        for t in vision.latest():
+            if t.state == "CAUTION":
+                slow_down()
+            if t.state == "CONFIRM" and t.action == "PICK":
+                approach(t.centroid, vision.frame_size)
+        drive_step()
+```
+
+`latest()` returns `Target(id, state, action, cls, conf, box, centroid, misses)`.
+
+**Two fields, not one, and on purpose.** `state` is `IGNORE`/`CAUTION`/`CONFIRM` — confidence smoothed over frames by the hysteresis in `runtime/policy.py`. `action` is `PICK`/`REPORT`/`IGNORE` — what the *class* means, from `policy.ACTIONS`. A CAUTION screw and a CAUTION shard both mean "slow down"; only the class says which one the magnet can lift, so collapsing them into one enum would lose the half FR-4 needs.
+
+**Capture runs on its own daemon thread.** The robot's loop is never blocked by a 20 ms frame grab, and a multi-second retrieval routine does not leave a backlog of stale frames behind it. `age` is how old the current targets are; the robot decides what is too old. A thread failure is stored and re-raised from the next `latest()` — a dead camera must not read as "no debris, keep patrolling".
+
+**Boxes are pixels** in the rotated frame, with `frame_size` to normalise against. No ground-plane projection: that needs a mount height and tilt this package cannot know.
+
+Install it into the Pi's **system** interpreter, which is where picamera2 and `hailo_platform` live:
+
+```
+sudo python3.11 -m pip install --break-system-packages -e /path/to/cv-poc
+```
+
+That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is `>=3.11`. Both are already on the Pi via apt's `python3-picamera2`, so the install adds effectively nothing — and no torch. Nothing under `runtime/` imports `ultralytics` or `yaml`; `pi/camera_hailo.py` imports `Vision` like any other consumer, which is what keeps the interface exercised by the tool that produced every number in `RESULT.md`.
+
 ## Export on the Mac, benchmark on the Pi
 
 Not a convenience — a constraint. `litert-converter` ships **no aarch64 Linux wheel**, so `format=litert` is buildable only on Linux x86_64 and macOS, *never on the Pi itself*. Since PRD AC-3 names TFLite INT8 as one of the three runtimes that must be measured, exporting on the Pi would have silently deleted a required runtime from the results. Inference is fine on the Pi — `ai-edge-litert` publishes aarch64 wheels with the XNNPACK runtime.
@@ -191,7 +229,7 @@ Every row records `threads`, `temp_start_c`, `temp_end_c`, `throttled`, `power_w
 ### Live camera on the Pi
 
 ```
-python3 pi/camera_hailo.py --hef artifacts/poc-v2-480/bench_int8_hailo_model/best.hef \
+python3 pi/camera_hailo.py --hef artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef \
   --preview --frames 0 --zoom 1.0
 ```
 
