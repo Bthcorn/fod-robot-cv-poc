@@ -116,7 +116,7 @@ SOURCES["fod-a-7"] = replace(
 # wrong. Gives up the type in a REPORT -- that returns as a second stage, if ever.
 SOURCES["fod-a-1"] = replace(
     SOURCES["fod-a"],
-    class_map={name: ("metal_fastener", 0) for name in
+    class_map={name: ("fod", 0) for name in
                ("Nail", "Screw", "Bolt", "Washer", "Nut", "BoltWasher", "BoltNutSet")},
     subset_size=None,
 )

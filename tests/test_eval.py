@@ -56,7 +56,7 @@ def test_a_perfect_prediction_scores_the_ceiling():
 
 def test_class_agnostic_scoring_ignores_which_class_was_predicted():
     """The whole point of metric 1: a 7-class model calling a box `washer` and a
-    1-class model calling it `metal_fastener` must land on the same number."""
+    1-class model calling it `fod` must land on the same number."""
     same_box = box(10, 10, 50, 50)
     as_washer = evaluate([frame([5], [0.9], same_box, [3], same_box)], HOLDOUT, {}, 0.25)
     as_one = evaluate([frame([0], [0.9], same_box, [0], same_box)], HOLDOUT, {}, 0.25)

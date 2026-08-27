@@ -9,7 +9,7 @@ Two kinds of source, one output shape Ultralytics can train and score directly:
 
 VOC sources (FOD-A) are downloaded and converted -- 31 categories collapse to
 the 4-class PoC scheme, keeping only images with a mapped box. That is the
-comparison experiment; PRD FR-3 specifies a single `metal_fastener` class.
+comparison experiment; PRD FR-3 specifies a single `fod` class.
 YOLO sources are already labelled, so they are copied in and validated.
 
 Preparing is scoped to one dataset's own directory and refuses to overwrite an

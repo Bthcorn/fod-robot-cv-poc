@@ -7,7 +7,7 @@ from fodcv.bench.pi import check_class_agreement, class_names_in, dataset_of
 from fodcv.research.dataset import write_data_yaml
 
 FOUR_CLASS = {0: "nail", 1: "screw", 2: "bolt", 3: "unknown"}
-ONE_CLASS = {0: "metal_fastener"}
+ONE_CLASS = {0: "fod"}
 
 
 @pytest.fixture

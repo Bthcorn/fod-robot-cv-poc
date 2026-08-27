@@ -57,14 +57,14 @@ def make_export(root, n=4, class_id=0):
 
 def test_a_valid_export_passes(tmp_path):
     root = make_export(tmp_path / "export")
-    assert len(dataset.validate_yolo_export(root, {0: "metal_fastener"})) == 4
+    assert len(dataset.validate_yolo_export(root, {0: "fod"})) == 4
 
 
 def test_an_image_with_no_label_is_rejected(tmp_path):
     root = make_export(tmp_path / "export")
     (root / "images" / "orphan.jpg").write_bytes(b"jpeg")
     with pytest.raises(AssertionError, match="no label file"):
-        dataset.validate_yolo_export(root, {0: "metal_fastener"})
+        dataset.validate_yolo_export(root, {0: "fod"})
 
 
 def test_an_undeclared_class_id_is_rejected(tmp_path):
@@ -72,14 +72,14 @@ def test_an_undeclared_class_id_is_rejected(tmp_path):
     model whose outputs mean something other than what they say."""
     root = make_export(tmp_path / "export", class_id=7)
     with pytest.raises(AssertionError, match="not in class_names"):
-        dataset.validate_yolo_export(root, {0: "metal_fastener"})
+        dataset.validate_yolo_export(root, {0: "fod"})
 
 
 def test_a_missing_labels_directory_is_rejected(tmp_path):
     root = tmp_path / "export"
     (root / "images").mkdir(parents=True)
     with pytest.raises(AssertionError, match="no labels/"):
-        dataset.validate_yolo_export(root, {0: "metal_fastener"})
+        dataset.validate_yolo_export(root, {0: "fod"})
 
 
 # --------------------------------------------------------------------------
@@ -151,7 +151,7 @@ def test_fod_a_1_collapses_every_fastener_onto_one_id():
     choice over one fixed image set, which is why their mAPs read together."""
     one = source("fod-a-1")
     assert set(one.class_map) == set(source("fod-a").class_map)
-    assert one.class_names == {0: "metal_fastener"}
+    assert one.class_names == {0: "fod"}
     assert {cid for _, cid in one.class_map.values()} == {0}
 
 

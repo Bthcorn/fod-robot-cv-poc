@@ -33,13 +33,13 @@ MAX_MISSES = 5  # frames a track can go unseen before it's dropped
 
 # What the robot does about a class, once its track is CONFIRM. Both taxonomies the
 # project ships: the 4-class FOD-A scheme in every artifacts/<run>/run.json, and the
-# single `metal_fastener` class docs/dataset-roadmap.md is heading for.
+# single `fod` class docs/dataset-roadmap.md is heading for.
 # ponytail: a dict, not a config format -- an unlisted class is IGNORE.
 ACTIONS = {
     "nail": "PICK",
     "screw": "PICK",
     "bolt": "PICK",
-    "metal_fastener": "PICK",
+    "fod": "PICK",
     "unknown": "REPORT",  # 53% of FOD-A and the class that fires on furniture
 }
 
