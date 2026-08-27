@@ -14,7 +14,11 @@ imports. This file is the geometry report, the preview HUD and the timing table
 around it -- so the interface the robot depends on is the one that produced every
 number in RESULT.md, and stays exercised.
 
-    sudo python3.11 -m pip install --break-system-packages -e .
+`fodcv` is found next door rather than installed. An editable install into the
+system interpreter needs sudo and --break-system-packages, and on a board that
+is reflashed it is one more step to forget -- which reads as
+`ModuleNotFoundError: No module named 'fodcv'` and looks like a broken checkout.
+Appended, not prepended: a real install still wins.
 
 Default HEF is a benchmark build at conf=0.001, a floor the chip cannot go
 below, so --conf does the real filtering; drop it for ~100 junk boxes a frame.
@@ -24,11 +28,14 @@ Live findings and the geometry this prints: RESULT.md §6.
 
 import argparse
 import math
+import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
 from fodcv.runtime.vision import (
     Vision,
@@ -88,14 +95,41 @@ def report_geometry(vision, args):
     return k
 
 
+def text(shot, string, org, scale, color, thickness=2):
+    """One label on a black plate sized to it.
+
+    Bare white putText is invisible against the white sheet RESULT.md 6 shot its
+    fasteners on, and an empty HUD reads as "the script is not running" -- the one
+    thing it does not mean. A plate, not the usual thick-black-underneath outline:
+    the fill stroke covers that outline completely on OpenCV 5, so the halo trick
+    silently does nothing on exactly the version this repo pins.
+    """
+    (w, h), base = cv2.getTextSize(string, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    # A box near an edge puts its label off-frame, and a half-clipped label is
+    # the one you most want to read -- it is on the detection at the edge.
+    x = max(0, min(org[0], shot.shape[1] - w - 2))
+    y = max(org[1], h + 3)
+    cv2.rectangle(shot, (x - 2, y - h - 3), (x + w + 2, y + base), (0, 0, 0), -1)
+    cv2.putText(shot, string, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+#: The label sits on top of the thing it names, so every character costs. `state`
+#: is a three-value enum and colour carries it for nothing -- which buys back the
+#: eight the word `CONFIRM/` was spending.
+STATE_COLOURS = {"CONFIRM": (80, 220, 80), "CAUTION": (0, 200, 255), "IGNORE": (170, 170, 170)}
+
+
 def draw(shot, targets, vision):
     for t in targets:
         if t.box is None:
             continue
         x0, y0, x1, y1 = t.box
-        cv2.rectangle(shot, (x0, y0), (x1, y1), (0, 200, 255), 2)
-        cv2.putText(shot, f"#{t.id} {t.cls} {t.conf:.2f} {t.state}/{t.action}",
-                    (x0, max(y0 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        colour = STATE_COLOURS.get(t.state, (0, 200, 255))
+        cv2.rectangle(shot, (x0, y0), (x1, y1), colour, 2)
+        # Track id kept, action dropped: the id is the only thing here you cannot
+        # infer from a still frame, and it is what says whether the tracker is
+        # holding identity or renumbering the same object every frame.
+        text(shot, f"#{t.id} {t.cls} {t.conf:.2f}", (x0, max(y0 - 6, 12)), 0.6, colour)
 
 
 def draw_hud(shot, targets, vision, args, k, focus):
@@ -105,25 +139,28 @@ def draw_hud(shot, targets, vision, args, k, focus):
     if detail < args.imgsz:
         sharp = "INTERPOLATED"
     distance, fom = focus
-    hud = (f"{vision.fps:.1f} FPS | {len(targets)} det | conf>={vision.conf:.2f} | "
+    # The best score the chip emitted this frame, whatever the filters did with it:
+    # `0 det, best 0.00` is a model that saw nothing, `0 det, best nut 0.62` is a
+    # class not in --classes or a conf set too high. Same HUD line, opposite bugs.
+    score, name = max(zip(vision.top_scores, vision.classes), default=(0.0, "-"))
+    hud = (f"{vision.fps:.1f} FPS | {len(targets)} det | best {name} {score:.2f} | "
+           f"conf>={vision.conf:.2f} | "
            f"zoom {vision.zoom:.2f} (need ~{need_px(shot.shape[1], vision.zoom)}px, {sharp})")
     focus_hud = (f"focus {fmt_m(distance)} (FoM {fom}) | at training scale here: "
                  f"~{k * distance * vision.zoom * 1000:.0f} mm object"
                  if not math.isinf(distance) else
                  f"focus infinity (FoM {fom}) -- nothing near is sharp")
-    cv2.putText(shot, hud, (10, shot.shape[0] - 56),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-    cv2.putText(shot, focus_hud, (10, shot.shape[0] - 34),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+    text(shot, hud, (10, shot.shape[0] - 56), 0.55, (255, 255, 255))
+    text(shot, focus_hud, (10, shot.shape[0] - 34), 0.55, (255, 255, 255))
     # 'u' is the 4-class taxonomy's toggle; a 31-class run has no `unknown` to
     # hide, so the key and its hint drop out.
     unknown_key = ""
     if "unknown" in vision.classes:
         on = "on" if "unknown" in vision.shown_classes() else "off"
         unknown_key = f" | u unknown ({on})"
-    cv2.putText(shot, f"q quit | +/- zoom | [ ] conf | r rotate ({vision.rotate}) | "
-                      f"f refocus{unknown_key}",
-                (10, shot.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    text(shot, f"green confirm, amber caution | q quit | +/- zoom | [ ] conf | "
+               f"r rotate ({vision.rotate}) | f refocus{unknown_key}",
+         (10, shot.shape[0] - 12), 0.5, (200, 200, 200), 1)
 
 
 def handle_key(key, vision):
@@ -176,7 +213,9 @@ def main():
     p.add_argument("--frames", type=int, default=300, help="0 runs until you press q")
     p.add_argument("--preview", action="store_true",
                    help="live window on the Pi's own screen; needs DISPLAY=:0 (XWayland)")
-    p.add_argument("--imgsz", type=int, default=480, help="must match the .hef's input")
+    p.add_argument("--imgsz", type=int, default=None,
+                   help="model input size. Default reads it off the .hef's nms_config.json; "
+                        "pass one only to override, and it must match")
     p.add_argument("--conf", type=float, default=0.25,
                    help="display filter only -- the .hef's own threshold is compiled in and cannot be lowered here")
     p.add_argument("--width", type=int, default=1280)
@@ -216,6 +255,7 @@ def main():
     with Vision(hef=args.hef, imgsz=args.imgsz, conf=args.conf, classes=args.classes,
                 width=args.width, height=args.height, zoom=args.zoom, rotate=args.rotate,
                 sensor_width=args.sensor_width, focus=args.focus, shutter=args.shutter) as vision:
+        args.imgsz = vision.imgsz  # resolved from the .hef when it was not given
         k = report_geometry(vision, args)
         focus = vision.focus_state()
         seen = -1
@@ -229,6 +269,13 @@ def main():
             if frame is None:
                 continue
             detections_seen += len(targets)
+            if seen == 1:
+                # Before --conf and before --classes. All ~0.00 is the model
+                # finding nothing; a high score here with nothing on screen is
+                # the filters, or a class the taxonomy renamed.
+                print("scores   highest per class on the first frame, unfiltered")
+                print("         " + ", ".join(f"{n} {s:.2f}" for n, s
+                                              in zip(vision.classes, vision.top_scores)))
 
             saving = args.save_every and seen % args.save_every == 0
             if not (saving or args.preview):
