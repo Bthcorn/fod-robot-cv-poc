@@ -69,7 +69,36 @@ def class_names(hef_path):
         f"no run.json at {run_json} -- a .hef must sit in artifacts/<run>/<export>/, "
         "beside the manifest that says what its class ids mean")
     names = json.loads(run_json.read_text())["classes"]
-    return [names[str(i)] for i in range(len(names))]
+    names = [names[str(i)] for i in range(len(names))]
+    # run.json is written from fodcv-migrate's --dataset, the .hef's class count
+    # from the weights. Wrong --dataset and they disagree with no symptom: the
+    # ids past the end of `names` are never in `_shown`, so every box of a class
+    # the taxonomy grew is dropped before it is ever drawn.
+    nms_config = Path(hef_path).with_name("nms_config.json")
+    if nms_config.exists():
+        decoded = json.loads(nms_config.read_text())["classes"]
+        assert decoded == len(names), (
+            f"{run_json} names {len(names)} classes {names} but the .hef decodes "
+            f"{decoded} -- re-run fodcv-migrate --dataset for the taxonomy this "
+            "model was trained on")
+    return names
+
+
+def hef_imgsz(hef_path, fallback=480):
+    """The .hef's input size, off the nms_config.json the hailo export writes
+    beside it.
+
+    A property of the build, not something a caller should carry: fodcv.matrix
+    defaults exports to 640 and hailo-compile.sh passes 480, so the two disagree
+    by default and the mismatch has no symptom worth the name -- the letterbox
+    just hands the chip the wrong square.
+    """
+    config = Path(hef_path).with_name("nms_config.json")
+    if not config.exists():
+        return fallback
+    dims = json.loads(config.read_text())["image_dims"]
+    assert dims[0] == dims[1], f"{config} declares a non-square input {dims}; letterbox assumes square"
+    return int(dims[0])
 
 
 def focus_arg(value):
@@ -175,11 +204,17 @@ class Vision:
     robot that passes nothing gets the configuration RESULT.md §6 measured.
     """
 
-    def __init__(self, hef, imgsz=480, conf=0.25, classes=None,
+    def __init__(self, hef, imgsz=None, conf=0.25, classes=None,
                  width=1280, height=720, zoom=1.0, rotate=0, sensor_width=2304,
                  focus=None, shutter=0, settle=1.0):
         self.hef_path = str(hef)
-        self.imgsz = imgsz
+        # None asks the .hef. An explicit size is still honoured -- a .hef with no
+        # nms_config.json beside it has nothing to ask -- but never silently.
+        declared = hef_imgsz(self.hef_path)
+        assert imgsz is None or imgsz == declared, (
+            f"--imgsz {imgsz} but {hef} declares a {declared}x{declared} input -- "
+            "the letterbox would feed the chip the wrong square")
+        self.imgsz = declared if imgsz is None else imgsz
         self.conf = conf
         self.width, self.height = width, height
         self.zoom = zoom
@@ -198,6 +233,10 @@ class Vision:
         self._shown = {self.classes.index(name) for name in wanted}
 
         self.stats = {name: [] for name in STAGES}
+        #: Highest score the chip emitted per class on the last frame, before
+        #: `conf` and before `--classes`. "Found nothing" and "the filter hid it"
+        #: are the same `0 det` on a HUD; this is what tells them apart.
+        self.top_scores = [0.0] * len(self.classes)
         self.frame_id = 0
         self._frame = None
         self._targets = []
@@ -209,6 +248,7 @@ class Vision:
         self._thread = None
         self._picam = None
         self._full_crop = None
+        self.input_name = None  # the .hef's input vstream, named once the device is up
 
     # -- lifecycle ----------------------------------------------------------------
 
@@ -408,14 +448,20 @@ class Vision:
         result = pipeline.infer({self.input_name: np.ascontiguousarray(batch)})
         t3 = time.perf_counter()
 
-        boxes = decode(list(result.values())[0][0], self._shown, self.conf,
-                       inverse, self.imgsz, bgr.shape)
+        per_class = list(result.values())[0][0]
+        self.top_scores = [float(np.asarray(rows)[:, 4].max()) if len(rows) else 0.0
+                           for rows in per_class]
+        boxes = decode(per_class, self._shown, self.conf, inverse, self.imgsz, bgr.shape)
         detections = [(((x0 + x1) / 2, (y0 + y1) / 2), score, self.classes[class_id])
                       for (x0, y0, x1, y1), class_id, score in boxes]
         tracks = policy.match_tracks(tracks, detections)
         # The tracker deals in centroids; the robot wants the box too, so carry it
         # across on the track. Matching is by centroid, so index by that.
-        by_centroid = {d[0]: b for d, b in zip(detections, boxes)}
+        # Both sides destructured: `Target.box` is four pixels, and storing a whole
+        # decode row here instead is a crash four frames away in the caller's
+        # drawing code, with nothing pointing back at this line.
+        by_centroid = {centroid: box
+                       for (centroid, _, _), (box, _, _) in zip(detections, boxes)}
         for track in tracks:
             track.box = by_centroid.get(track.centroid, getattr(track, "box", None))
         t4 = time.perf_counter()

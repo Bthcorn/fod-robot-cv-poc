@@ -5,6 +5,8 @@ and all three are pure. The hardware halves (`Vision._open_camera`, `Vision._loo
 are verified on the board by the timing table `pi/camera_hailo.py` prints.
 """
 
+import json
+
 import numpy as np
 import pytest
 
@@ -138,3 +140,74 @@ def test_frame_size_follows_the_rotation():
     assert v.frame_size == (1280, 720)
     v.rotate = 90
     assert v.frame_size == (720, 1280)
+
+
+def test_a_run_json_that_disagrees_with_the_hef_is_refused(tmp_path):
+    """The wrong `fodcv-migrate --dataset` is otherwise silent: a 7-class .hef
+    read as 4 classes drops every box of the three ids that have no name."""
+    export = tmp_path / "bench_int8_hailo_model"
+    export.mkdir()
+    (tmp_path / "run.json").write_text(
+        '{"classes": {"0": "nail", "1": "screw", "2": "bolt", "3": "unknown"}}')
+    (export / "nms_config.json").write_text('{"classes": 7}')
+    with pytest.raises(AssertionError, match="4 classes"):
+        vision.class_names(export / "best.hef")
+
+
+def hef_with(run_dir, **config):
+    """An artifact directory as fodcv-migrate + the hailo export leave it."""
+    export = run_dir / "bench_int8_hailo_model"
+    export.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps(
+        {"classes": {str(i): n for i, n in enumerate(CLASSES)}}))
+    (export / "nms_config.json").write_text(json.dumps(
+        {"classes": len(CLASSES), "image_dims": [480, 480], **config}))
+    return export / "best.hef"
+
+
+def test_the_input_size_is_read_off_the_hef(tmp_path):
+    """fodcv.matrix exports at 640 by default and hailo-compile.sh at 480, so the
+    size is a property of the build, not of whoever runs the camera."""
+    assert vision.hef_imgsz(hef_with(tmp_path / "a", image_dims=[640, 640])) == 640
+    assert vision.hef_imgsz(hef_with(tmp_path / "b")) == 480
+    assert vision.hef_imgsz(tmp_path / "c" / "best.hef") == 480  # nothing to ask
+
+
+def test_an_imgsz_that_contradicts_the_hef_is_refused(tmp_path):
+    hef = hef_with(tmp_path / "d", image_dims=[640, 640])
+    with pytest.raises(AssertionError, match="640x640"):
+        vision.Vision(hef=hef, imgsz=480)
+
+
+class FakePipeline:
+    """`InferVStreams` as `_step` uses it: one NMS output, batch of one."""
+
+    def __init__(self, per_class):
+        self.per_class = per_class
+
+    def infer(self, _batch):
+        return {"best/yolov8_nms_postprocess": [self.per_class]}
+
+
+class FakeCamera:
+    def __init__(self, frame):
+        self.frame = frame
+
+    def capture_array(self):
+        return self.frame
+
+
+def test_a_step_publishes_a_four_pixel_box(tmp_path):
+    """The hardware half `pi/camera_hailo.py` unpacks. `_step` is the only place
+    the box leaves `decode` for a track, and it is what the robot reads."""
+    v = vision.Vision(hef=hef_with(tmp_path / "e"))
+    v._picam = FakeCamera(np.zeros((480, 480, 3), dtype=np.uint8))
+    per_class = hailo_output({1: [[0.25, 0.25, 0.5, 0.5, 0.9]]})
+
+    targets = vision.to_targets(v._step(FakePipeline(per_class), []))
+
+    assert len(targets) == 1
+    x0, y0, x1, y1 = targets[0].box  # four, as the caller unpacks
+    assert (x0, y0, x1, y1) == (120, 120, 240, 240)
+    assert targets[0].cls == "screw"
+    assert v.top_scores == [0.0, pytest.approx(0.9), 0.0, 0.0]
