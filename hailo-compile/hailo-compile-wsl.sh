@@ -123,4 +123,5 @@ fodcv-export \
   --dataset "${HEF_DATASET:-fod-a}" \
   --imgsz "${HEF_IMGSZ:-480}" \
   --conf "${HEF_CONF:-0.001}" \
-  --formats hailo --precisions int8
+  --formats hailo --precisions int8 \
+  ${HEF_FORCE:+--force} ${HEF_A16_CLS:+--a16-cls}

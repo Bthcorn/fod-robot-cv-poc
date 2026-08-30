@@ -16,6 +16,7 @@ Run:  uv run fodcv-export --run poc-v1
 Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 
+import contextlib
 import re
 import subprocess
 from pathlib import Path
@@ -73,6 +74,48 @@ def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
     raise RuntimeError(f"isolated litert export failed:\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}")
 
 
+@contextlib.contextmanager
+def a16_classification_head():
+    """Compile the detect head's class convs at 16-bit instead of 8.
+
+    This is what killed plan-b4-7class. The first .hef compiled clean and decoded
+    nothing; the rebuild goes silent on 25% of holdout frames its own FP32 weights
+    score at recall 1.000, and flickers on the Pi at both 480 and 640. The 1-class
+    and 4-class heads survived a8 on this same toolchain -- seven classes split the
+    same score signal across seven channels, so each lands in fewer of the 256 steps.
+
+    Ultralytics offers no hook: quantize='w8a16' is rejected for hailo (it is not in
+    W8A16_FORMATS) and export_hailo assembles its model script inline. So intercept
+    the script on its way into the DFC and append one line. The cls layers are the
+    ones the script already names in change_output_activation(..., sigmoid) -- reading
+    them back out beats hardcoding conv54/65/80, which are per-model names.
+
+    Costs latency and size. Only worth it for a head that measurably lost its scores.
+    """
+    from hailo_sdk_client import ClientRunner  # compile host only; absent on the Mac
+
+    original = ClientRunner.load_model_script
+
+    def patched(self, script, *args, **kwargs):
+        return original(self, cls_layers_to_a16(script), *args, **kwargs)
+
+    ClientRunner.load_model_script = patched
+    try:
+        yield
+    finally:
+        ClientRunner.load_model_script = original
+
+
+def cls_layers_to_a16(script: str) -> str:
+    """Append a 16-bit precision line for the class convs named in `script`."""
+    layers = re.findall(r"change_output_activation\((\w+), sigmoid\)", script)
+    # No sigmoid lines means the head shape changed under us and we would be
+    # compiling an unmodified a8 script while reporting an a16 build.
+    assert layers, f"no sigmoid class layers found in model script:\n{script}"
+    print(f"  a16 class head: {', '.join(layers)}")
+    return f"{script}\nquantization_param([{', '.join(layers)}], precision_mode=a16_w16)"
+
+
 def check_quantized(manifest: dict, manifest_path: Path, formats: list[str]):
     """An INT8 artifact the size of its FP32 twin was never quantized.
 
@@ -110,7 +153,7 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
 
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
-        precisions=None, imgsz=IMGSZ, force=False, conf=None):
+        precisions=None, imgsz=IMGSZ, force=False, conf=None, a16_cls=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -150,13 +193,16 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                         extra = dict(FMT_EXTRA_ARGS.get(fmt, {}))
                         if conf is not None and "conf" in extra:
                             extra["conf"] = conf
-                        path = YOLO(str(weights)).export(
-                            format=fmt,
-                            imgsz=imgsz,
-                            quantize=quantize,
-                            data=str(calib) if takes_calibration(fmt, quantize) else None,
-                            **extra,
-                        )
+                        with contextlib.ExitStack() as stack:
+                            if a16_cls and fmt == "hailo":
+                                stack.enter_context(a16_classification_head())
+                            path = YOLO(str(weights)).export(
+                                format=fmt,
+                                imgsz=imgsz,
+                                quantize=quantize,
+                                data=str(calib) if takes_calibration(fmt, quantize) else None,
+                                **extra,
+                            )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that cannot load back is
                     # not an export. Except hailo -- HailoBackend opens the PCIe

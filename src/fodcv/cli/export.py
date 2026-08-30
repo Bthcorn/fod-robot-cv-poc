@@ -23,6 +23,10 @@ def main():
                              "benchmark row comparable to the host-NMS backends. A deploy .hef "
                              "wants 0.10-0.25 instead -- on the Pi the compiled value is a floor "
                              "that --conf can only filter above")
+    parser.add_argument("--a16-cls", action="store_true",
+                        help="hailo only: compile the detect head's class convs at 16-bit. "
+                             "Costs latency and size; buys back a class head that INT8 "
+                             "silenced. See export.a16_classification_head")
     args = parser.parse_args()
 
     export.run(
@@ -34,6 +38,7 @@ def main():
         imgsz=args.imgsz,
         force=args.force,
         conf=args.conf,
+        a16_cls=args.a16_cls,
     )
 
 
