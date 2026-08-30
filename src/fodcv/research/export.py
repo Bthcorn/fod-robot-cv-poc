@@ -153,7 +153,8 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
 
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
-        precisions=None, imgsz=IMGSZ, force=False, conf=None, a16_cls=False):
+        precisions=None, imgsz=IMGSZ, force=False, conf=None, calib_fraction=None,
+        a16_cls=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -193,6 +194,12 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                         extra = dict(FMT_EXTRA_ARGS.get(fmt, {}))
                         if conf is not None and "conf" in extra:
                             extra["conf"] = conf
+                        # `fraction` is a cfg key, not an export argument, so it
+                        # rides through model.export's **kwargs into the Exporter
+                        # and is read by get_int8_calibration_dataloader. Only
+                        # sent when set, so an unqualified export is unchanged.
+                        if calib_fraction is not None and takes_calibration(fmt, quantize):
+                            extra["fraction"] = calib_fraction
                         with contextlib.ExitStack() as stack:
                             if a16_cls and fmt == "hailo":
                                 stack.enter_context(a16_classification_head())

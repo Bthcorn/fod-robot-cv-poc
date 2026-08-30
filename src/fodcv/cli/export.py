@@ -23,6 +23,13 @@ def main():
                              "benchmark row comparable to the host-NMS backends. A deploy .hef "
                              "wants 0.10-0.25 instead -- on the Pi the compiled value is a floor "
                              "that --conf can only filter above")
+    parser.add_argument("--calib-fraction", type=float, default=None,
+                        help="fraction of the dataset's TRAIN split to calibrate INT8 from. "
+                             "Unset uses all of it, which is right for a 3k dataset and "
+                             "hours of DFC time for a 10k one. Hailo warns below 1,024 "
+                             "images and poc-v2 used 2,550. Ultralytics takes "
+                             "im_files[:round(n*fraction)] -- the first N in sorted order, "
+                             "not a sample")
     parser.add_argument("--a16-cls", action="store_true",
                         help="hailo only: compile the detect head's class convs at 16-bit. "
                              "Costs latency and size; buys back a class head that INT8 "
@@ -38,6 +45,7 @@ def main():
         imgsz=args.imgsz,
         force=args.force,
         conf=args.conf,
+        calib_fraction=args.calib_fraction,
         a16_cls=args.a16_cls,
     )
 

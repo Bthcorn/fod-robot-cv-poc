@@ -46,13 +46,48 @@ def test_available_reports_kind_and_prepared_state():
 # --------------------------------------------------------------------------
 
 
-def make_export(root, n=4, class_id=0):
-    (root / "images").mkdir(parents=True)
-    (root / "labels").mkdir(parents=True)
+def write_image(path, pattern):
+    """A real, decodable JPEG -- split_grouped hashes pixels, not bytes.
+
+    Patterned, not a flat fill: ahash thresholds on the frame's own mean, so
+    every uniform image collides with every other one whatever its colour.
+    """
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(pattern)
+    Image.fromarray(rng.integers(0, 256, (32, 32), dtype=np.uint8)).save(path)
+
+
+def make_export(root, n=4, class_id=0, layout="repo"):
+    """A minimal labelled export, in either layout prepare must read.
+
+    `repo`     images/ + labels/            -- what this project writes
+    `roboflow` <split>/images + <split>/labels -- what a Roboflow export ships
+    """
     for i in range(n):
-        (root / "images" / f"img{i}.jpg").write_bytes(b"jpeg")
-        (root / "labels" / f"img{i}.txt").write_text(f"{class_id} 0.5 0.5 0.2 0.2\n")
+        base = root / f"split{i % 2}" if layout == "roboflow" else root
+        (base / "images").mkdir(parents=True, exist_ok=True)
+        (base / "labels").mkdir(parents=True, exist_ok=True)
+        # Distinct fills, so each image is its own ahash group and the split
+        # cuts where val_fraction says rather than landing lopsided.
+        write_image(base / "images" / f"img{i}.jpg", i)
+        (base / "labels" / f"img{i}.txt").write_text(f"{class_id} 0.5 0.5 0.2 0.2\n")
     return root
+
+
+def test_a_roboflow_layout_export_passes(tmp_path):
+    """<split>/images/, not images/<split>/ -- the layout every Roboflow export
+    ships and the one _label_for used to resolve to a path that does not exist."""
+    root = make_export(tmp_path / "export", layout="roboflow")
+    assert len(dataset.validate_yolo_export(root, {0: "fod"})) == 4
+
+
+def test_label_for_resolves_both_layouts():
+    from pathlib import Path
+
+    assert dataset._label_for(Path("/d/images/train/x.jpg")) == Path("/d/labels/train/x.txt")
+    assert dataset._label_for(Path("/d/train/images/x.jpg")) == Path("/d/train/labels/x.txt")
 
 
 def test_a_valid_export_passes(tmp_path):
@@ -78,7 +113,15 @@ def test_an_undeclared_class_id_is_rejected(tmp_path):
 def test_a_missing_labels_directory_is_rejected(tmp_path):
     root = tmp_path / "export"
     (root / "images").mkdir(parents=True)
-    with pytest.raises(AssertionError, match="no labels/"):
+    write_image(root / "images" / "img0.jpg", 0)
+    with pytest.raises(AssertionError, match="no label file"):
+        dataset.validate_yolo_export(root, {0: "fod"})
+
+
+def test_an_export_with_no_images_at_all_is_rejected(tmp_path):
+    root = tmp_path / "export"
+    root.mkdir()
+    with pytest.raises(AssertionError, match="no images"):
         dataset.validate_yolo_export(root, {0: "fod"})
 
 

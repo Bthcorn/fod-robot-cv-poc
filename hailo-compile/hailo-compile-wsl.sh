@@ -124,4 +124,5 @@ fodcv-export \
   --imgsz "${HEF_IMGSZ:-480}" \
   --conf "${HEF_CONF:-0.001}" \
   --formats hailo --precisions int8 \
+  ${HEF_FRACTION:+--calib-fraction "$HEF_FRACTION"} \
   ${HEF_FORCE:+--force} ${HEF_A16_CLS:+--a16-cls}

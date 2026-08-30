@@ -23,6 +23,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+import numpy as np
+
 from fodcv.paths import CURRENT_DATASET, DATA_DIR, dataset_dir, dataset_yaml
 from fodcv.research.datasets import HOLDOUT_STEMS, SOURCES, VocSource, YoloSource, source
 
@@ -63,6 +65,43 @@ def split(items: list, val_fraction: float, seed: int, subset_size: int | None =
         items = items[:subset_size]
     n_val = int(len(items) * val_fraction)
     return {"val": items[:n_val], "train": items[n_val:]}
+
+
+def ahash(path: Path) -> bytes:
+    """16x16 average hash. Two frames of the same scene collide, different
+    scenes do not.
+
+    ponytail: a whole-frame average hash, not scene metadata -- a Roboflow
+    export carries no scene id, and this is what actually measured the leak.
+    Ceiling: it groups near-identical *frames*, not a camera lock that panned.
+    Upgrade to grouping on collection metadata when the arena dataset lands
+    (docs/dataset-roadmap.md).
+    """
+    from PIL import Image  # ultralytics already brings pillow; research/ only
+
+    a = np.asarray(Image.open(path).convert("L").resize((16, 16)), dtype=np.float32)
+    return (a > a.mean()).tobytes()
+
+
+def split_grouped(images: list[Path], val_fraction: float, seed: int) -> dict[str, list[Path]]:
+    """Split so a near-duplicate cluster never spans train and val.
+
+    Splitting per image puts the same frame on both sides and inflates val mAP.
+    RESULT.md section 7 measures that at 74% on fod-a-3k, and both Roboflow
+    exports registered here arrive with 14-26% of their own val already
+    present in their own train.
+
+    Groups are ordered by hash, NOT by path: the shuffle below must see the
+    same sequence on every machine, and absolute paths differ between them.
+    That is RESULT.md:310's bug -- filesystem order feeding the shuffle, so one
+    seed drew two different splits -- and it would come straight back here.
+    """
+    groups: dict[bytes, list[Path]] = {}
+    for image in images:
+        groups.setdefault(ahash(image), []).append(image)
+    ordered = [sorted(g) for _, g in sorted(groups.items())]
+    cut = split(ordered, val_fraction, seed)
+    return {name: [p for group in items for p in group] for name, items in cut.items()}
 
 
 def _claim_output(dataset: str, force: bool) -> Path:
@@ -193,10 +232,17 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
 # --- already-YOLO sources ---
 
 
-def _label_for(image: Path, root: Path) -> Path:
-    """The YOLO convention: labels/ mirrors images/, same stem, .txt."""
-    relative = image.relative_to(root / "images")
-    return root / "labels" / relative.with_suffix(".txt")
+def _label_for(image: Path) -> Path:
+    """The YOLO convention: labels/ mirrors images/, same stem, .txt.
+
+    Locates `images` from the right, so this reads both layouts in use -- this
+    repo's `images/<split>/` and a Roboflow export's `<split>/images/`. Taking
+    it from the left instead would resolve a Roboflow path to
+    `labels/<split>/images/...`, which does not exist, and every image would
+    report a missing label.
+    """
+    i = len(image.parts) - 1 - image.parts[::-1].index("images")
+    return Path(*image.parts[:i], "labels", *image.parts[i + 1:]).with_suffix(".txt")
 
 
 def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
@@ -205,18 +251,16 @@ def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
     An assert, not a warning: a class id the registry does not name produces a
     model whose outputs silently mean the wrong thing.
     """
-    assert (root / "images").is_dir(), f"no images/ under {root}"
-    assert (root / "labels").is_dir(), f"no labels/ under {root}"
+    images = sorted(p for d in root.rglob("images") if d.is_dir()
+                    for p in d.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
+    assert images, f"no images under any images/ directory in {root}"
 
-    images = sorted(p for p in (root / "images").rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
-    assert images, f"no images under {root / 'images'}"
-
-    missing = [p for p in images if not _label_for(p, root).exists()]
+    missing = [p for p in images if not _label_for(p).exists()]
     assert not missing, f"{len(missing)} image(s) with no label file, first: {missing[0]}"
 
     seen = set()
     for image in images:
-        for line in _label_for(image, root).read_text().split("\n"):
+        for line in _label_for(image).read_text().split("\n"):
             if line.strip():
                 seen.add(int(line.split()[0]))
     undeclared = sorted(seen - set(class_names))
@@ -234,13 +278,21 @@ def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
         shutil.copytree(root / "images", out / "images")
         shutil.copytree(root / "labels", out / "labels")
     else:
-        for name, items in split(images, src.val_fraction, src.seed).items():
+        # Grouped, not per-image: an export that ships its own split has already
+        # been split by someone, and both Roboflow ones split per image.
+        subset = split_grouped(images, src.val_fraction, src.seed)
+        for name, items in subset.items():
             (out / "images" / name).mkdir(parents=True, exist_ok=True)
             (out / "labels" / name).mkdir(parents=True, exist_ok=True)
             for image in items:
                 shutil.copy(image, out / "images" / name / image.name)
-                label = _label_for(image, root)
+                label = _label_for(image)
                 shutil.copy(label, out / "labels" / name / label.name)
+        # The cut is on group count, so the image-level fraction lands near
+        # val_fraction rather than on it. Print what it actually was.
+        n_val, n_train = len(subset["val"]), len(subset["train"])
+        print(f"train: {n_train} images, val: {n_val} images "
+              f"({n_val / (n_val + n_train):.1%}, target {src.val_fraction:.0%})")
 
     data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
     print(f"data.yaml: {data_yaml}")

@@ -19,7 +19,7 @@
 $ErrorActionPreference = "Stop"
 
 $envArgs = @()
-foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF", "HEF_GPU", "HEF_WHEEL", "HEF_WHEEL_URL", "HEF_WHEEL_SHA256", "HEF_VENV") {
+foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF", "HEF_FRACTION", "HEF_FORCE", "HEF_A16_CLS", "HEF_GPU", "HEF_WHEEL", "HEF_WHEEL_URL", "HEF_WHEEL_SHA256", "HEF_VENV") {
     $value = [Environment]::GetEnvironmentVariable($name)
     if ($value) { $envArgs += "$name=$value" }
 }

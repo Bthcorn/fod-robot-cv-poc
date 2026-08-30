@@ -122,6 +122,33 @@ SOURCES["fod-a-1"] = replace(
 )
 
 
+# --- Roboflow YOLOv11 exports ---
+#
+# Both ship `<split>/images/` and their own train/valid/test cut. That cut is
+# discarded: 368 of 2535 ARG_Bolts val images and 126 of 492 Fastener val
+# images have a near-duplicate in their own train split, so `val_fraction` is
+# set and dataset.split_grouped re-cuts them with duplicate clusters kept whole.
+
+SOURCES["arg-bolts-4"] = YoloSource(
+    source_dir=Path("~/Downloads/ARG_Bolts_FV.v3i.yolov11").expanduser(),
+    # Lowercase deliberately: eval.holdout_class matches a model's class name
+    # against fod-a-clean's by exact string, so `bolt` and `screw` score against
+    # the holdout's own boxes instead of falling through to `unknown`.
+    class_names={0: "bolt", 1: "nut", 2: "screw", 3: "washer"},
+    val_fraction=0.15,
+)
+
+# A-J as the export names them. The source documents no meaning for the
+# letters, and inventing one would make every REPORT wrong in a way no metric
+# here catches. Seven classes, so its .hef needs --a16-cls -- see
+# export.a16_classification_head for what a8 does to a 7-class head.
+SOURCES["fastener-7"] = YoloSource(
+    source_dir=Path("~/Downloads/Fastener.v1i.yolov11").expanduser(),
+    class_names={0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "J"},
+    val_fraction=0.15,
+)
+
+
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:
     known = ", ".join(sorted(SOURCES))
     assert dataset in SOURCES, f"unknown dataset {dataset!r} -- known: {known}"
