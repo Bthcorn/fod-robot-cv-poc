@@ -192,6 +192,41 @@ def fastener_boxes(xml_path: Path, class_map: dict[str, tuple[str, int]]):
     return boxes
 
 
+def background_stems(ann_dir: Path, class_map: dict[str, tuple[str, int]],
+                     limit: int, seed: int) -> list[str]:
+    """Stems with no mapped box, sampled round-robin across VOC categories.
+
+    Round-robin rather than a flat shuffle: FOD-A's negatives are 12% Pliers and
+    0.5% Tape, so a flat draw teaches one negative shape well and 23 badly.
+    Small categories exhaust and the remainder spreads over the large ones.
+    """
+    buckets: dict[str, list[str]] = {}
+    # sorted, for the reason _prepare_voc's own glob is sorted.
+    for xml_path in sorted(ann_dir.glob("*.xml")):
+        if xml_path.stem in HOLDOUT_STEMS:
+            continue  # scored against, so never trained on -- unconditional
+        if fastener_boxes(xml_path, class_map):
+            continue  # a positive, handled by the caller
+        names = [obj.findtext("name") for obj in ET.parse(xml_path).getroot().findall("object")]
+        if names:
+            buckets.setdefault(sorted(names)[0], []).append(xml_path.stem)
+
+    rng = random.Random(seed)
+    for stems in buckets.values():
+        rng.shuffle(stems)
+
+    picked: list[str] = []
+    order = sorted(buckets)
+    while len(picked) < limit and any(buckets[name] for name in order):
+        for name in order:
+            if not buckets[name]:
+                continue
+            picked.append(buckets[name].pop())
+            if len(picked) == limit:
+                break
+    return picked
+
+
 def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
     voc_root = fetch_voc(src)
     ann_dir, img_dir = voc_root / "Annotations", voc_root / "JPEGImages"
@@ -210,11 +245,19 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
             for class_id, *_ in boxes:
                 class_counts[class_id] += 1
 
+    backgrounds = (background_stems(ann_dir, src.class_map, src.background_max, src.seed)
+                   if src.background_max else [])
+
     print(f"holdout images withheld: {len(HOLDOUT_STEMS)}")
     print(f"images with a mapped box: {len(candidates)}")
     print(f"box counts by class: {[(src.class_names[cid], n) for cid, n in sorted(class_counts.items())]}")
+    print(f"background images (no mapped box): {len(backgrounds)}")
 
     subset = split(candidates, src.val_fraction, src.seed, src.subset_size)
+    # Split separately, and never append to candidates: split() trims to
+    # subset_size after shuffling, so one merged list would both evict positives
+    # to make room and move every already-recorded dataset's train/val cut.
+    bg_subset = split(backgrounds, src.val_fraction, src.seed)
     for name, items in subset.items():
         (out / "images" / name).mkdir(parents=True, exist_ok=True)
         (out / "labels" / name).mkdir(parents=True, exist_ok=True)
@@ -222,8 +265,15 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
             shutil.copy(img_dir / f"{stem}.jpg", out / "images" / name / f"{stem}.jpg")
             lines = [f"{cid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}" for cid, cx, cy, bw, bh in boxes]
             (out / "labels" / name / f"{stem}.txt").write_text("\n".join(lines) + "\n")
+        for stem in bg_subset[name]:
+            shutil.copy(img_dir / f"{stem}.jpg", out / "images" / name / f"{stem}.jpg")
+            # Empty, not absent: Ultralytics reads either as a background, but
+            # every image here having a label file is what validate_yolo_export
+            # asserts, and a missing file reads as a bug rather than a negative.
+            (out / "labels" / name / f"{stem}.txt").write_text("")
 
     data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
+    print(f"backgrounds: {len(bg_subset['train'])} train, {len(bg_subset['val'])} val")
     print(f"train: {len(subset['train'])} images, val: {len(subset['val'])} images")
     print(f"data.yaml: {data_yaml}")
     return data_yaml

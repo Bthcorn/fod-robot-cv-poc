@@ -42,6 +42,9 @@ class VocSource:
     # dropped -- how 31 FOD-A categories become 4.
     class_map: dict[str, tuple[str, int]]
     subset_size: int | None = None  # None = every image with a mapped box
+    # Images with no mapped box, kept as YOLO background images instead of
+    # dropped. 0 leaves the dataset exactly as it was before this existed.
+    background_max: int = 0
     val_fraction: float = 0.15
     seed: int = 0  # fixed, or two machines score different images
 
@@ -121,13 +124,31 @@ SOURCES["fod-a-1"] = replace(
     subset_size=None,
 )
 
+# fod-a-1 plus the 24 non-fastener categories the class map throws away, kept as
+# background images. b3 scores 60/60 on the scene-clean holdout and still put 793
+# boxes on 120 frames of an empty room -- a fan grille at 0.55, a curtain, and one
+# box across half the frame -- because it has never seen an image with nothing in
+# it. 9,360 is 1:1 against the positives that survive the holdout withhold.
+# A new id, not an edit: fod-a-1 is what plan-b3-1class was trained on.
+SOURCES["fod-a-1-neg"] = replace(SOURCES["fod-a-1"], background_max=9360)
+
 
 # --- Roboflow YOLOv11 exports ---
 #
 # Both ship `<split>/images/` and their own train/valid/test cut. That cut is
-# discarded: 368 of 2535 ARG_Bolts val images and 126 of 492 Fastener val
-# images have a near-duplicate in their own train split, so `val_fraction` is
-# set and dataset.split_grouped re-cuts them with duplicate clusters kept whole.
+# taken as shipped -- val_fraction stays None -- and test/ is dropped, because
+# the published mAP these are measured against was trained that way.
+#
+# What that buys is a comparable number, not a clean one. Their `valid/` splits
+# overlap their own `train/` by 14.5% (arg-bolts, 368 of 2535) and 25.6%
+# (fastener-7). Measured 2026-09-03, the overlap is *scene*-level, not duplicate
+# frames: the same plate on the same carpet at the same pose, with the fasteners
+# rearranged -- different objects, different boxes. ahash cannot tell those
+# apart; the plate dominates a 16x16 whole-frame hash.
+#
+# So read arg-bolts-4's val mAP against the dataset page's 90.6%, and NOT as a
+# scene-disjoint score. When a scene-disjoint one is wanted, prepare
+# arg-bolts-4-grouped.
 
 SOURCES["arg-bolts-4"] = YoloSource(
     source_dir=Path("~/Downloads/ARG_Bolts_FV.v3i.yolov11").expanduser(),

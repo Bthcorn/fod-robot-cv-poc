@@ -90,7 +90,7 @@ if leaked:
 # Same source zip, cached after the first. fod-a-7 and fod-a-1 are the same
 # images under a different class map, so this is conversion time, not download.
 prepare "$BASE"                    # A and C train on it
-if want B; then prepare fod-a-1; prepare fod-a-7; fi
+if want B; then prepare fod-a-1; prepare fod-a-7; prepare fod-a-1-neg; fi
 
 # ---------------------------------------------------- A: noise floor + convergence
 # Three identical configs, three seeds. The spread is the bar every later delta
@@ -123,6 +123,19 @@ if want B; then
   # The opposite bet: 7 classes, told apart instead of merged. Tests whether
   # `unknown` was hurting by being a grab-bag of four shapes.
   train plan-b4-7class fod-a-7 yolo11n.pt --set seed=0                     # 1.0x
+
+  # b3 scores 60/60 on the scene-clean holdout and still put 793 boxes on 120
+  # frames of an empty room -- gap 1 below, which FOD-A turns out to half-cover
+  # after all: 24 non-fastener categories, 24,170 images, dropped by the class
+  # map rather than absent.
+  #
+  # b5 is the control and is not optional. b6 moves two axes against b3 --
+  # negatives and 640->480 -- and there is no 1-class@480 run to attribute a
+  # null result against: :116 is 4-class@480, :121 is 1-class@640. 480 measured
+  # a tie on the holdout (0.8869 vs 0.8837), so the control should land on b3
+  # and any move is the negatives. It costs 0.6x of one base run.
+  train plan-b5-1class-480 fod-a-1     yolo11n.pt --set seed=0 --set imgsz=480  # ~0.6x
+  train plan-b6-1class-neg fod-a-1-neg yolo11n.pt --set seed=0 --set imgsz=480  # ~1.2x
 fi
 
 # ---------------------------------------------------------------- C: viewpoint
@@ -176,10 +189,13 @@ cat <<'DONE'
 
 Four axes this plan does NOT cover, in the order they are worth adding:
 
-  1. Negative images. No run here touches the false-positive problem, because
-     FOD-A cannot: it has no furniture, no clutter, no empty floor. ~200
-     unlabelled background frames from the Pi is the cheapest fix in the whole
-     project, and it needs a shoot, not a flag.
+  1. Negative images from the Pi. b6 covers half of this: FOD-A does hold
+     24,170 non-fastener images the class map was dropping, and they are now
+     backgrounds. What they cannot be is furniture, clutter or empty floor --
+     every one is still an object on tarmac, and a fan grille scoring 0.55 is
+     what actually needs answering. ~200 unlabelled frames from the Pi remains
+     the cheapest fix in the project, and it needs a shoot, not a flag.
+     fodcv-eval --background says whether b6 got far enough without them.
   2. Photometric and motion augmentation. hsv_* and a blur are arguably closer
      to deployment than perspective is -- fasteners are specular, arena lighting
      is not FOD-A's, and a robot at 30 fps produces motion blur that no training
