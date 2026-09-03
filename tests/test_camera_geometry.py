@@ -1,6 +1,6 @@
 """The camera geometry that decides whether a fastener is big enough to detect.
 
-These used to be lifted out of `pi/camera_hailo.py` by AST, because that module
+These used to be lifted out of `fodcv/cli/camera_hailo.py` by AST, because that module
 imported cv2, picamera2 and hailo_platform at the top and none of the three exist
 on the Mac. They now live in `fodcv.runtime.vision`, which imports the hardware
 lazily -- so this is a plain import, and the scraping fixture is gone.

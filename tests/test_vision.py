@@ -2,7 +2,7 @@
 
 Everything the robot reads comes out of `decode` -> `match_tracks` -> `to_targets`,
 and all three are pure. The hardware halves (`Vision._open_camera`, `Vision._loop`)
-are verified on the board by the timing table `pi/camera_hailo.py` prints.
+are verified on the board by the timing table `fodcv-hailo-camera` prints.
 """
 
 import json
@@ -198,7 +198,7 @@ class FakeCamera:
 
 
 def test_a_step_publishes_a_four_pixel_box(tmp_path):
-    """The hardware half `pi/camera_hailo.py` unpacks. `_step` is the only place
+    """The hardware half `fodcv-hailo-camera` unpacks. `_step` is the only place
     the box leaves `decode` for a track, and it is what the robot reads."""
     v = vision.Vision(hef=hef_with(tmp_path / "e"))
     v._picam = FakeCamera(np.zeros((480, 480, 3), dtype=np.uint8))
@@ -211,3 +211,90 @@ def test_a_step_publishes_a_four_pixel_box(tmp_path):
     assert (x0, y0, x1, y1) == (120, 120, 240, 240)
     assert targets[0].cls == "screw"
     assert v.top_scores == [0.0, pytest.approx(0.9), 0.0, 0.0]
+
+
+# --- the lookahead zone: PRD FR-4's only input -----------------------------------
+
+FRAME = (1280, 720)  # (width, height), post-rotation
+LOWER_HALF = (0.5, 1.0)
+
+
+def confirmed_at(y, x=100.0):
+    """One CONFIRM track whose centroid sits at height y."""
+    return policy.match_tracks([], [((x, y), 0.9, "screw")])
+
+
+def test_a_confirmed_track_in_the_strip_blocks_the_zone():
+    assert vision.in_zone(confirmed_at(500.0), LOWER_HALF, FRAME)
+
+
+def test_a_confirmed_track_above_the_strip_does_not():
+    """Debris the robot is not about to drive over must not command v_slow, or
+    the speed policy never returns to v_fast and there is no effect to measure."""
+    assert not vision.in_zone(confirmed_at(100.0), LOWER_HALF, FRAME)
+
+
+def test_a_caution_track_in_the_strip_does_not_block():
+    """FR-4 says a *confirmed* detection commands v_slow. CAUTION is the middle
+    band the hysteresis has not promoted yet."""
+    tracks = policy.match_tracks([], [((100.0, 500.0), 0.3, "screw")])
+    assert tracks[0].state() == "CAUTION"
+    assert not vision.in_zone(tracks, LOWER_HALF, FRAME)
+
+
+def test_the_speed_policy_sees_a_track_the_target_list_drops():
+    """The one that must not be 'simplified' onto latest(). A track coasting on
+    its miss budget has no box to draw, so to_targets drops it -- but it is still
+    believed to be there, and going fast over it costs the pickup. Presence
+    flickers where confidence does not, and this is the only thing damping it."""
+    tracks = confirmed_at(500.0)
+    tracks = policy.match_tracks(tracks, [])  # a frame with no detection
+
+    assert tracks[0].misses == 1, "still tracked"
+    assert vision.to_targets(tracks) == [], "but not reported as a target"
+    assert vision.in_zone(tracks, LOWER_HALF, FRAME), "and still blocking the zone"
+
+
+def test_the_strip_is_measured_in_the_rotated_frame():
+    """frame_size swaps at 90/270, so the same centroid falls in the strip in one
+    orientation and outside it in the other."""
+    v = vision.Vision.__new__(vision.Vision)
+    v.width, v.height = 1280, 720
+    v.rotate = 90
+    assert v.frame_size == (720, 1280)
+    assert not vision.in_zone(confirmed_at(500.0), LOWER_HALF, v.frame_size)
+    v.rotate = 0
+    assert vision.in_zone(confirmed_at(500.0), LOWER_HALF, v.frame_size)
+
+
+def test_a_backwards_lookahead_is_refused(tmp_path):
+    """(0.9, 0.5) selects nothing and reads as 'the floor is always clear'."""
+    with pytest.raises(AssertionError, match="lookahead"):
+        vision.Vision(hef=hef_with(tmp_path / "z"), lookahead=(0.9, 0.5))
+
+
+def test_a_thread_failure_resurfaces_from_zone_blocked():
+    """Same reason as latest(): a dead camera must not read as a clear floor."""
+    v = vision.Vision.__new__(vision.Vision)
+    v._error = RuntimeError("HailoRTStatusException")
+    with pytest.raises(RuntimeError, match="HailoRTStatusException"):
+        v.zone_blocked()
+
+
+def test_a_step_publishes_the_zone_decision(tmp_path):
+    """End to end through the thread's half: the robot polls zone_blocked(), which
+    reads what _step computed, not the tracks themselves."""
+    # width/height must match what the fake camera hands back: frame_size is what
+    # the strip is measured against, and it comes from the configured size.
+    v = vision.Vision(hef=hef_with(tmp_path / "f"), lookahead=LOWER_HALF,
+                      width=480, height=480)
+    v._picam = FakeCamera(np.zeros((480, 480, 3), dtype=np.uint8))
+    assert not v.zone_blocked(), "nothing seen yet"
+
+    # a box in the bottom-right quadrant of a 480x480 frame -> centroid y 300 of 480
+    tracks = v._step(FakePipeline(hailo_output({1: [[0.55, 0.55, 0.7, 0.7, 0.9]]})), [])
+    assert tracks[0].state() == "CONFIRM"
+    assert v.zone_blocked()
+
+    v._step(FakePipeline(hailo_output({1: [[0.05, 0.05, 0.2, 0.2, 0.9]]})), [])
+    assert not v.zone_blocked(), "the new track is in the top-left, outside the strip"

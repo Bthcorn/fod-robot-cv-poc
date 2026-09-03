@@ -27,6 +27,14 @@ CURRENT_DATASET = "fod-a"
 
 STOCK_WEIGHTS = "yolo11n.pt"
 
+# The run the robot deploys, which is not CURRENT_RUN: that one defaults the
+# Mac-side pipeline, this one names the .hef on the board. Deliberately relative
+# and NOT built from ROOT -- the robot pip-installs this package, which puts
+# ROOT inside site-packages, where no artifacts/ tree exists. The deploy bundle
+# is unpacked next to wherever the robot is run from, so cwd is the right anchor.
+DEPLOY_RUN = "poc-v2-480-full"
+DEPLOY_HEF = Path("artifacts") / DEPLOY_RUN / "bench_int8_hailo_model" / "best.hef"
+
 # The only scene-disjoint holdout in artifacts/: 263 images from 250 FOD-A scenes
 # that contributed no training frame to poc-v1 or poc-v2. Every other run's eval/
 # is that dataset's own val split, 74% near-duplicates of its train split, so a

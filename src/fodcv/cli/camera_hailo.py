@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Live Camera Module 3 -> Hailo-8 detection on the Pi 5. Diagnostic front end.
 
-Run with the *system* interpreter, not the project venv:
+Installed into the Pi's *system* interpreter, not the project venv:
 
-    python3 pi/camera_hailo.py --frames 300
+    fodcv-hailo-camera --frames 300
 
 picamera2 is an apt package built against Python 3.11 and the venv is 3.12 --
 a different C ABI, so `import libcamera` there fails whatever pip does. System
@@ -14,11 +14,9 @@ imports. This file is the geometry report, the preview HUD and the timing table
 around it -- so the interface the robot depends on is the one that produced every
 number in RESULT.md, and stays exercised.
 
-`fodcv` is found next door rather than installed. An editable install into the
-system interpreter needs sudo and --break-system-packages, and on a board that
-is reflashed it is one more step to forget -- which reads as
-`ModuleNotFoundError: No module named 'fodcv'` and looks like a broken checkout.
-Appended, not prepended: a real install still wins.
+This is the first thing to run on a new board: it answers "is the camera framed
+and focused, and does the chip see anything" before any control loop exists to
+blame. See docs/INTEGRATION.md.
 
 Default HEF is a benchmark build at conf=0.001, a floor the chip cannot go
 below, so --conf does the real filtering; drop it for ~100 junk boxes a frame.
@@ -28,15 +26,13 @@ Live findings and the geometry this prints: RESULT.md §6.
 
 import argparse
 import math
-import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
-
+from fodcv import paths
 from fodcv.runtime.vision import (
     Vision,
     fmt_m,
@@ -209,7 +205,8 @@ def report_timings(vision, out_dir):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--hef", default="artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef")
+    p.add_argument("--hef", default=str(paths.DEPLOY_HEF),
+                   help="relative to the working directory: the deploy bundle unpacks there")
     p.add_argument("--frames", type=int, default=300, help="0 runs until you press q")
     p.add_argument("--preview", action="store_true",
                    help="live window on the Pi's own screen; needs DISPLAY=:0 (XWayland)")

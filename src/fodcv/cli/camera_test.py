@@ -1,7 +1,7 @@
 """Live webcam smoke test on the Mac: proves camera->inference->display works.
 
 Uses OpenCV (source=0), not picamera2. Real capture on the Pi is
-pi/camera_hailo.py.
+fodcv-hailo-camera.
 """
 
 import argparse

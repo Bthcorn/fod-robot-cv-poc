@@ -189,7 +189,7 @@ Two limits on that comparison. The v1 losses were measured on the contaminated 9
 
 ## 6. Live camera
 
-`pi/camera_hailo.py`: Camera Module 3 → letterbox → Hailo → boxes. **30 FPS end to end, and the camera is the limit, not the chip** — inference is ~10 ms of a 33 ms frame, so roughly 3× headroom remains before compute constrains anything.
+`fodcv-hailo-camera`: Camera Module 3 → letterbox → Hailo → boxes. **30 FPS end to end, and the camera is the limit, not the chip** — inference is ~10 ms of a 33 ms frame, so roughly 3× headroom remains before compute constrains anything.
 
 | Stage | Median ms |
 |---|---:|

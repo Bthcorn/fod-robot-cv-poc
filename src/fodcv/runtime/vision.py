@@ -3,15 +3,18 @@
     from fodcv.runtime.vision import Vision
 
     with Vision(hef=".../best.hef") as vision:
-        while patrolling:
+        while sweeping:
             if vision.age > 0.5:
                 halt("vision stalled")
-            for t in vision.latest():
-                if t.state == "CAUTION":
-                    slow_down()
-                if t.state == "CONFIRM" and t.action == "PICK":
-                    approach(t.centroid, vision.frame_size)
+            set_speed(V_SLOW if vision.zone_blocked() else V_FAST)
             drive_step()
+
+The robot needs less than this module offers. Collection is passive -- a fixed
+magnet arc under a rotating shell, no gripper and no targeting -- so nothing ever
+steers toward an object, and the speed policy is the only consumer. That reduces
+to one boolean per frame, which is `zone_blocked()`. `latest()` is there for
+logging, a HUD, and the telemetry heatmap; branching on it is not the main path.
+See docs/INTEGRATION.md.
 
 Capture runs on its own daemon thread, so the robot's loop is never blocked by a
 20 ms frame grab and a multi-second retrieval routine does not leave a backlog of
@@ -183,6 +186,27 @@ def decode(per_class, shown, conf, inverse, size, shape):
     return boxes
 
 
+def in_zone(tracks, lookahead, frame_size):
+    """Is a confirmed track inside the lookahead strip? PRD FR-4's speed input.
+
+    Takes tracks, not the targets `to_targets` produces, and the difference is the
+    point. `to_targets` drops anything with misses > 0, which is right for a box
+    you would draw and wrong here: a track coasting on MAX_MISSES is still
+    believed to exist, so filtering on presence would chatter the speed policy for
+    up to 5 frames -- 167 ms at 30 FPS -- every time one frame missed a detection.
+    That is exactly the flicker the EMA hysteresis removes from *confidence* and
+    nothing removes from *presence*. Erring slow costs a frame; erring fast costs
+    the pickup.
+
+    `lookahead` is a (lo, hi) fraction of frame height, and `frame_size` is
+    post-rotation, so this is measured in the same frame the boxes are.
+    """
+    lo, hi = lookahead
+    height = frame_size[1]
+    return any(lo * height <= track.centroid[1] <= hi * height
+               for track in tracks if track.state() == "CONFIRM")
+
+
 def to_targets(tracks):
     """Live tracks -> what the robot reads. Missed tracks are dropped: a track
     coasting on MAX_MISSES has no box this frame, and a stale box is worse than
@@ -206,7 +230,7 @@ class Vision:
 
     def __init__(self, hef, imgsz=None, conf=0.25, classes=None,
                  width=1280, height=720, zoom=1.0, rotate=0, sensor_width=2304,
-                 focus=None, shutter=0, settle=1.0):
+                 focus=None, shutter=0, settle=1.0, lookahead=(0.5, 1.0)):
         self.hef_path = str(hef)
         # None asks the .hef. An explicit size is still honoured -- a .hef with no
         # nms_config.json beside it has nothing to ask -- but never silently.
@@ -223,6 +247,14 @@ class Vision:
         self.focus = focus
         self.shutter = shutter
         self.settle = settle
+        # PLACEHOLDER, not a measurement. The real strip falls out of the camera
+        # height and tilt (PRD O-3, undecided) and the field-of-view width and
+        # lookahead distance (M-3, unmeasured); RESULT.md 8 narrows the tilt to
+        # 10-25 deg at 15-30 cm and no further. The lower half of the frame is a
+        # starting point to tune from, and nothing here should be quoted.
+        lo, hi = lookahead
+        assert 0.0 <= lo < hi <= 1.0, f"lookahead {lookahead} must be 0 <= lo < hi <= 1"
+        self.lookahead = (lo, hi)
 
         self.classes = class_names(self.hef_path)
         wanted = list(self.classes) if classes is None else list(classes)
@@ -240,6 +272,7 @@ class Vision:
         self.frame_id = 0
         self._frame = None
         self._targets = []
+        self._blocked = False
         self._stamp = 0.0
         self._error = None
         self._lock = threading.Lock()
@@ -284,6 +317,24 @@ class Vision:
         self._raise_if_failed()
         with self._lock:
             return list(self._targets)
+
+    def zone_blocked(self):
+        """Is a confirmed target in the lookahead strip? The speed policy's only input.
+
+        PRD FR-4: a confirmed detection in the zone commands v_slow, a clear zone
+        v_fast. The hold-off that keeps the robot slow until the object has passed
+        under the drum belongs to the caller -- its length is the camera-to-drum
+        distance over the current speed, and this module does not know the speed.
+
+        Computed in the capture thread (see `in_zone`) rather than here, so the
+        consumer never touches a Track the thread is still mutating.
+
+        Re-raises a thread failure for the same reason latest() does: a dead camera
+        must not read as a clear floor.
+        """
+        self._raise_if_failed()
+        with self._lock:
+            return self._blocked
 
     def snapshot(self):
         """(frame, targets) for a preview or a saved JPEG. The frame is not copied --
@@ -469,6 +520,7 @@ class Vision:
         with self._lock:
             self._frame = bgr
             self._targets = to_targets(tracks)
+            self._blocked = in_zone(tracks, self.lookahead, self.frame_size)
             self._stamp = time.monotonic()
         self.frame_id += 1
 

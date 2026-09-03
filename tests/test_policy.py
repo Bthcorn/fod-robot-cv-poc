@@ -125,3 +125,33 @@ def test_a_caution_track_promotes_once_its_ema_reaches_confirm():
 def test_hysteresis_boundaries_are_inclusive_at_the_lower_edge(ema, expected):
     track = Track((0, 0), ema)
     assert track.state() == expected
+
+
+# --- retuning on the real mount (PRD M-12) ---------------------------------------
+
+@pytest.fixture
+def restore_constants():
+    """tune() writes module globals, so a test that calls it must put them back."""
+    saved = {name: getattr(policy, name) for name in policy._TUNABLE}
+    yield
+    for name, value in saved.items():
+        setattr(policy, name, value)
+
+
+def test_tune_retunes_the_hysteresis(restore_constants):
+    """FR-4 tags all three thresholds MEASURE and M-12 names the retune. The
+    teammate installs from a pinned tag, so editing this file means forking it."""
+    policy.tune(CONFIRM_THRESH=0.7, EMA_ALPHA=0.2)
+
+    track = Track((0, 0), 0.6)
+    assert track.state() == "CAUTION", "0.6 no longer confirms"
+    assert policy.EMA_ALPHA == 0.2
+    assert policy.CAUTION_THRESH == 0.25, "untouched constants stay put"
+
+
+def test_tune_refuses_a_misspelled_constant():
+    """The whole reason tune() exists: a bare assignment to CONFIRM_THRESHOLD
+    binds a global nothing reads. No error, no effect, a wasted tuning session."""
+    with pytest.raises(AssertionError, match="CONFIRM_THRESHOLD"):
+        policy.tune(CONFIRM_THRESHOLD=0.7)
+    assert policy.CONFIRM_THRESH == 0.5, "and nothing was applied"

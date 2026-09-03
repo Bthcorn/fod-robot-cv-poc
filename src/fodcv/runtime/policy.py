@@ -31,6 +31,27 @@ EMA_ALPHA = 0.4  # weight on the newest frame
 MAX_MATCH_DIST = 80  # px, greedy nearest-centroid match radius
 MAX_MISSES = 5  # frames a track can go unseen before it's dropped
 
+#: What `tune()` will accept. Every one is read as a module global at call time,
+#: so plain assignment already works -- the set exists to make a misspelling loud.
+_TUNABLE = {"CONFIRM_THRESH", "CAUTION_THRESH", "EMA_ALPHA", "MAX_MATCH_DIST", "MAX_MISSES"}
+
+
+def tune(**constants):
+    """Retune the hysteresis on the real mount (PRD M-12, FR-4's MEASURE tag).
+
+    The five constants above are writable by assignment, but a misspelled name
+    binds a new global that nothing reads: no error, no effect, and a tuning
+    session that produces nothing. That is the whole reason this exists.
+
+        policy.tune(CONFIRM_THRESH=0.6, EMA_ALPHA=0.3)
+
+    ponytail: module globals, not constructor arguments -- one process owns the
+    Hailo device, so there is never a second Vision wanting different values.
+    """
+    unknown = sorted(set(constants) - _TUNABLE)
+    assert not unknown, f"unknown constant(s) {unknown}; tunable: {sorted(_TUNABLE)}"
+    globals().update(constants)
+
 # What the robot does about a class, once its track is CONFIRM. Both taxonomies the
 # project ships: the 4-class FOD-A scheme in every artifacts/<run>/run.json, and the
 # single `fod` class docs/dataset-roadmap.md is heading for.

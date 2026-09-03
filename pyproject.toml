@@ -1,6 +1,6 @@
 [project]
 name = "fod-vision"
-version = "0.1.0"
+version = "0.2.0"
 description = "FOD robot vision: dataset prep, fine-tuning, runtime export, on-device benchmarking, and the runtime the robot imports"
 readme = "README.md"
 # 3.11, not 3.12: the Pi runs fodcv.runtime on its *system* interpreter, which
@@ -58,6 +58,9 @@ fodcv-migrate = "fodcv.cli.migrate_artifacts:main"
 fodcv-export = "fodcv.cli.export:main"
 # Pi side.
 fodcv-bench = "fodcv.cli.bench_pi:main"
+# Robot side. Base dependencies only -- these are what the Pi installs.
+fodcv-hailo-camera = "fodcv.cli.camera_hailo:main"
+fodcv-robot-stub = "fodcv.cli.robot_stub:main"
 # Demos and camera helpers.
 fodcv-policy = "fodcv.cli.confidence_policy:main"
 fodcv-camera = "fodcv.cli.camera_test:main"

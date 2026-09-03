@@ -15,7 +15,8 @@ src/fodcv/cli/      one module per command: argparse, then the call into the
                     are self-contained -- Mac-only stand-ins, not pipeline
                     steps. Wired to console scripts in pyproject.toml -- see
                     Commands below.
-pi/                 runs on the Pi with the *system* interpreter, not the venv.
+                    camera_hailo and robot_stub run on the Pi with the
+                    *system* interpreter, not the venv.
 tests/
 data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
@@ -106,6 +107,8 @@ Every command is a console script installed by `uv sync`. Names map one-to-one o
 | `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test, Mac-only stand-in for the Pi's real camera. |
 | `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices. |
 | `fodcv-policy` | `cli/confidence_policy.py` | Confidence hysteresis + multi-frame EMA smoothing demo. |
+| `fodcv-hailo-camera` | `cli/camera_hailo.py` | Live Camera Module 3 → Hailo detection with a preview HUD, geometry readout and timing table. Run **on the Pi**, system interpreter. |
+| `fodcv-robot-stub` | `cli/robot_stub.py` | The robot's FR-4 loop with prints instead of motors. Run **on the Pi** to prove the seam. |
 
 ### Sweeping
 
@@ -123,42 +126,77 @@ It produces candidates, it does not rank them. Every mAP it prints is against
 the training dataset's own val split, which for FOD-A is near-duplicate
 contaminated -- see RESULT.md §7, and score on the scene-clean holdout instead.
 
-`pi/camera_hailo.py` is not a console script — it runs on the Pi with the **system** interpreter (see below).
+`fodcv-hailo-camera` and `fodcv-robot-stub` are console scripts like the rest, but run on the Pi with the **system** interpreter (see below).
 
 ## The robot's interface
 
-The robot lives in its own repo and imports this one. What it gets is one class:
+The robot lives in its own repo, installs this one and imports one class:
 
 ```python
 from fodcv.runtime.vision import Vision
 
-with Vision(hef="artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef") as vision:
-    while patrolling:
+with Vision(hef=".../best.hef", lookahead=(0.5, 1.0)) as vision:
+    while sweeping:
         if vision.age > 0.5:
             halt("vision stalled")
-        for t in vision.latest():
-            if t.state == "CAUTION":
-                slow_down()
-            if t.state == "CONFIRM" and t.action == "PICK":
-                approach(t.centroid, vision.frame_size)
+        set_speed(V_SLOW if vision.zone_blocked() else V_FAST)
         drive_step()
 ```
 
-`latest()` returns `Target(id, state, action, cls, conf, box, centroid, misses)`.
+**[`docs/INTEGRATION.md`](docs/INTEGRATION.md) is the handoff document** — install, the
+release bundle, the stable-vs-diagnostic field contract, failure modes, hysteresis
+retuning for M-12, and where the latency budget in RESULT.md §6 stops being ours. Read
+that, not this section.
 
-**Two fields, not one, and on purpose.** `state` is `IGNORE`/`CAUTION`/`CONFIRM` — confidence smoothed over frames by the hysteresis in `runtime/policy.py`. `action` is `PICK`/`REPORT`/`IGNORE` — what the *class* means, from `policy.ACTIONS`. A CAUTION screw and a CAUTION shard both mean "slow down"; only the class says which one the magnet can lift, so collapsing them into one enum would lose the half FR-4 needs.
+Three things worth knowing from here:
 
-**Capture runs on its own daemon thread.** The robot's loop is never blocked by a 20 ms frame grab, and a multi-second retrieval routine does not leave a backlog of stale frames behind it. `age` is how old the current targets are; the robot decides what is too old. A thread failure is stored and re-raised from the next `latest()` — a dead camera must not read as "no debris, keep patrolling".
+`zone_blocked()` is the whole product. Collection is passive — PRD FR-11 has no gripper
+and no targeting, so nothing steers toward an object and FR-15 makes the homography
+optional. The robot needs one boolean per frame: is a confirmed detection in the strip of
+floor it is about to drive over. `latest()` returns `Target(id, state, action, cls, conf,
+box, centroid, misses)` for logging and the telemetry heatmap, not for the main path.
 
-**Boxes are pixels** in the rotated frame, with `frame_size` to normalise against. No ground-plane projection: that needs a mount height and tilt this package cannot know.
+**`state` and `action` are two fields on purpose.** `state` is `IGNORE`/`CAUTION`/`CONFIRM`
+— confidence smoothed over frames by the hysteresis in `runtime/policy.py`. `action` is
+`PICK`/`REPORT`/`IGNORE`, from `policy.ACTIONS`, keyed by class. A CAUTION screw and a
+CAUTION shard both mean "slow down"; only the class says which one the magnet can lift.
+`cls` itself is diagnostic only — FR-3 collapses the taxonomy to one class and the names go
+away, so nothing downstream may branch on it.
 
-Install it into the Pi's **system** interpreter, which is where picamera2 and `hailo_platform` live:
+**Capture runs on its own daemon thread.** The robot's loop is never blocked by a 20 ms
+frame grab, and a multi-second routine does not leave a backlog of stale frames behind it.
+`age` is how old the current targets are; the robot decides what is too old. A thread
+failure is stored and re-raised from the next `latest()` or `zone_blocked()` — a dead
+camera must not read as "no debris, keep patrolling".
+
+Install it into the Pi's **system** interpreter, which is where picamera2 and
+`hailo_platform` live:
 
 ```
-sudo python3.11 -m pip install --break-system-packages -e /path/to/cv-poc
+sudo python3.11 -m pip install --break-system-packages \
+  'fod-vision @ git+https://github.com/Bthcorn/fod-robot-cv-poc.git@v0.2.0'
 ```
 
-That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is `>=3.11`. Both are already on the Pi via apt's `python3-picamera2`, so the install adds effectively nothing — and no torch. Nothing under `runtime/` imports `ultralytics` or `yaml`; `pi/camera_hailo.py` imports `Vision` like any other consumer, which is what keeps the interface exercised by the tool that produced every number in `RESULT.md`.
+That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is
+`>=3.11`. Both are already on the Pi via apt's `python3-picamera2`, so the install adds
+effectively nothing — and no torch. Nothing under `runtime/` imports `ultralytics` or
+`yaml`; `fodcv/cli/camera_hailo.py` imports `Vision` like any other consumer, which is what
+keeps the interface exercised by the tool that produced every number in `RESULT.md`.
+
+### The deploy bundle
+
+The `.hef` is gitignored. Ship three files, ~7.8 MB, as a release asset on the same tag the
+robot pins — not an rsync, so "which model is on the board" has an answer:
+
+```
+tar czf poc-v2-480-full.tar.gz \
+  artifacts/poc-v2-480-full/run.json \
+  artifacts/poc-v2-480-full/bench_int8_hailo_model/
+gh release create v0.2.0 poc-v2-480-full.tar.gz
+```
+
+`run.json` and `nms_config.json` travel with the `.hef` because the class names and the
+input size are read off them at load time, not hardcoded.
 
 ## Export on the Mac, benchmark on the Pi
 
@@ -229,11 +267,10 @@ Every row records `threads`, `temp_start_c`, `temp_end_c`, `throttled`, `power_w
 ### Live camera on the Pi
 
 ```
-python3 pi/camera_hailo.py --hef artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef \
-  --preview --frames 0 --zoom 1.0
+fodcv-hailo-camera --preview --frames 0 --zoom 1.0
 ```
 
-Run with the **system** interpreter, not the project venv: `python3-picamera2` is an apt package built against Python 3.11 and the venv is 3.12 — a different C ABI, so `import libcamera` fails there no matter what pip does. System 3.11 already carries picamera2, libcamera, `hailo_platform` and cv2. There is no torch or ultralytics in that file; the `.hef` does NMS on-chip, so postprocess is a coordinate transform.
+Run with the **system** interpreter, not the project venv: `python3-picamera2` is an apt package built against Python 3.11 and the venv is 3.12 — a different C ABI, so `import libcamera` fails there no matter what pip does. System 3.11 already carries picamera2, libcamera, `hailo_platform` and cv2. There is no torch or ultralytics in it; the `.hef` does NMS on-chip, so postprocess is a coordinate transform.
 
 `--preview` needs `DISPLAY=:0`, which conflicts with rule 3 above — preview and benchmarking are different sessions. Keys: `q` quit, `+`/`-` sensor zoom, `[`/`]` confidence, `r` rotate, `f` refocus, `u` toggle the `unknown` class. `--focus` takes `auto` (default) or a distance in metres; the startup block prints the measured focus distance and the object size that sits at training scale there.
 
