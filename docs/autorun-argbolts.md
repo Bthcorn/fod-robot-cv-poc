@@ -200,6 +200,26 @@ the first epoch lands is correct, not a failure.
 falling, mAP50 rising then flattening. ETA for the run is
 `(EPOCHS - epochs_done) * time_per_epoch`.
 
+**Report the real total after epoch 1, not the estimate in this file.** Every
+duration here is extrapolated from `yolo11n` on other hardware; one measured
+epoch beats all of it, and on rented time it is the number that decides whether
+`m` is worth paying for.
+
+**On a rented box, check the GPU is the thing working.** Every image in this
+export is already 640x640, so at `imgsz=640` the dataloader only decodes and
+augments — but on a fast card with few vCPUs that is still enough to starve it,
+and a starved GPU is rent paid for idle silicon:
+
+```bash
+nvidia-smi --query-gpu=utilization.gpu --format=csv -l 5   # ctrl-c after a minute
+```
+
+Sustained below ~70% during training means dataloader-bound. Add
+`--set cache=ram` to `train()` and relaunch: the decoded train split is 10.9 GB
+(8,891 x 1.23 MB), 14.0 GB with val, so it needs a box with ~24 GB RAM free.
+Caching is pure I/O and changes no gradients, so unlike batch size it does not
+invalidate a comparison — but apply it to every run anyway.
+
 ### What to do when it is not healthy
 
 | Symptom | Cause | Action |
