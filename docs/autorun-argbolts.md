@@ -97,16 +97,43 @@ compilation is not part of training — it runs later, on the Mac or WSL, via
 `uv sync --extra research` on a pod installs nothing related to it. An agent
 that tries to obtain the DFC here is solving a problem that does not exist.
 
-**The dataset is an upload, not a download.** The Roboflow export is ~789 MB and
-already on the Mac as `~/Downloads/ARG_Bolts_FV.v3i.yolov11.zip`. Send that
-rather than re-exporting from Roboflow — no account on the pod, no API key, no
-expiring link:
+**Getting the dataset there — two ways, and the fast one is not the obvious
+one.** The export is ~789 MB. Whichever path is used, it must end up unzipped at
+the directory `datasets.py` names, because that is what prep resolves:
+
+```bash
+uv run python -c "from fodcv.research.datasets import source; print(source('arg-bolts-4').source_dir)"
+```
+
+*Fast — the pod pulls it.* The bottleneck in the other path is the human's home
+uplink (~3.5 min at 30 Mbps); a pod on datacenter bandwidth fetches the same
+file in seconds. Roboflow's dataset page gives a `curl` line under Download
+Dataset → YOLOv11 → show download code → Terminal. **The key in that line is a
+credential: take it as an env var, never write it into a file in this repo, a
+shell history that gets committed, or a log.**
+
+```bash
+mkdir -p ~/Downloads/ARG_Bolts_FV.v3i.yolov11
+curl -fL "$ROBOFLOW_EXPORT_URL" -o /tmp/rf.zip   # URL carries the key; keep it in the env
+unzip -q /tmp/rf.zip -d ~/Downloads/ARG_Bolts_FV.v3i.yolov11 && rm /tmp/rf.zip
+```
+
+*Simple — push it from the Mac.* No account on the pod, no key, no link that can
+expire. Costs one home upload:
 
 ```bash
 scp ~/Downloads/ARG_Bolts_FV.v3i.yolov11.zip pod:/workspace/
 # on the pod -- ~/Downloads is what datasets.py resolves via expanduser()
 mkdir -p ~/Downloads && unzip -q /workspace/ARG_Bolts_FV.v3i.yolov11.zip \
   -d ~/Downloads/ARG_Bolts_FV.v3i.yolov11
+```
+
+Either way, verify before launching — a half-unzipped export fails at epoch 0 of
+the first run, ~30 h into nothing:
+
+```bash
+ls ~/Downloads/ARG_Bolts_FV.v3i.yolov11        # expect train valid test data.yaml
+find ~/Downloads/ARG_Bolts_FV.v3i.yolov11 -name '*.jpg' | wc -l   # expect 12678
 ```
 
 Put it on a persistent network volume, not the pod's ephemeral disk — the pod
