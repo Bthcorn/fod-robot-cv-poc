@@ -6,6 +6,10 @@ agent with no memory of the session that produced it.
 
 **Point an agent at this file and say: "run docs/autorun-argbolts.md".**
 
+Compiling the `.hef` on the same rented box, rather than stopping at
+`best.pt`, is `docs/autorun-runpod-e2e.md` — it wraps this file rather than
+replacing it.
+
 The sweep is four backbones on one dataset, one axis moving. What it exists to
 answer, and the numbers it is read against, are in
 [the question](#the-question-this-answers) below — an agent that skips that
@@ -90,12 +94,17 @@ never for one run, or the comparison is confounded and the sweep is wasted.
 The sweep is ~30 h and `m` is ~20 h of it, which is what makes renting a 4090
 cheaper than occupying a desktop for a day. Three things about that:
 
-**The Hailo wheel is not needed here and must not be looked for.** `.hef`
-compilation is not part of training — it runs later, on the Mac or WSL, via
-`hailo-compile/hailo-compile.sh`, which mounts the DFC wheel from the host's
-`~/Downloads`. `pyproject.toml` carries no Hailo dependency at all, so
-`uv sync --extra research` on a pod installs nothing related to it. An agent
-that tries to obtain the DFC here is solving a problem that does not exist.
+**The Hailo wheel is not part of training.** `.hef` compilation is a separate
+stage, and `pyproject.toml` carries no Hailo dependency at all — `uv sync
+--extra research` installs nothing related to it. An agent running *this* file
+that goes hunting for the DFC is solving a problem it does not have.
+
+Where that stage runs depends on which runbook is in play. Under this file it
+happens afterwards on the Mac or WSL, via `hailo-compile/hailo-compile.sh`,
+which mounts the wheel from the host's `~/Downloads`. Under
+`docs/autorun-runpod-e2e.md` it happens on this same pod at its Stage 4, and the
+wheel is fetched there — still not here, and still not before the sweep is
+launched.
 
 **Getting the dataset there — two ways, and the fast one is not the obvious
 one.** The export is ~789 MB. Whichever path is used, it must end up unzipped at
