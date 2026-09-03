@@ -295,6 +295,53 @@ def _label_for(image: Path) -> Path:
     return Path(*image.parts[:i], "labels", *image.parts[i + 1:]).with_suffix(".txt")
 
 
+# Roboflow's split names -> ours. `test/` is deliberately absent: the pipeline
+# models two splits, and the shipped recipe the published mAP is measured
+# against trains on train/ alone.
+SHIPPED_SPLITS = {"train": "train", "valid": "val", "val": "val"}
+
+
+def _shipped_split(image: Path) -> str | None:
+    """`<split>/images/x.jpg` -> our split name, or None for a split we skip."""
+    i = len(image.parts) - 1 - image.parts[::-1].index("images")
+    return SHIPPED_SPLITS.get(image.parts[i - 1])
+
+
+def _boxed_label(label: Path) -> str:
+    """A label file as detection lines, any polygon reduced to its own bounds.
+
+    Roboflow's ARG_Bolts export mixes `cls cx cy w h` with segmentation
+    polygons, and in 671 of its 8,334 labelled train files it mixes them in the
+    SAME file. Ultralytics decides box-vs-polygon per *file* -- `any(len(x) > 6
+    for x in lb)` in ultralytics/data/utils.py -- so one polygon makes it
+    reshape every plain box line to (-1, 2) as well, reading `cx cy w h` as the
+    two points (cx, cy) and (w, h) and taking their bounds. That silently
+    rewrote 26% of this export's instances, median IoU 0.004 against the box
+    the file states, on both sides of the split; the loader reports nothing.
+
+    Normalising here means the file Ultralytics opens is uniformly 5-field, so
+    that branch never fires. A polygon still becomes exactly the box
+    segments2boxes would have given it -- this changes nothing for a file that
+    is all polygons, and everything for one that is not.
+    """
+    lines = []
+    for raw in label.read_text().split("\n"):
+        parts = raw.split()
+        if not parts:
+            continue
+        if len(parts) == 5:
+            lines.append(" ".join(parts))  # verbatim: no float round-trip
+            continue
+        assert len(parts) > 6 and len(parts) % 2 == 1, f"{label}: unreadable label line {raw!r}"
+        xs = [float(v) for v in parts[1::2]]
+        ys = [float(v) for v in parts[2::2]]
+        lines.append(f"{parts[0]} {(min(xs) + max(xs)) / 2:.6f} {(min(ys) + max(ys)) / 2:.6f} "
+                     f"{max(xs) - min(xs):.6f} {max(ys) - min(ys):.6f}")
+    # Empty stays empty, not a blank line: a background image has a label file
+    # with nothing in it -- see _prepare_voc.
+    return "".join(f"{line}\n" for line in lines)
+
+
 def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
     """Every image has a label, and every class id used is declared.
 
@@ -324,25 +371,39 @@ def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
     images = validate_yolo_export(root, src.class_names)
     print(f"{len(images)} labelled images in {root}")
     if src.val_fraction is None:
-        # The export already carries its own split; take it verbatim.
-        shutil.copytree(root / "images", out / "images")
-        shutil.copytree(root / "labels", out / "labels")
+        # The export already carries its own split; take it verbatim. Anything
+        # SHIPPED_SPLITS does not name -- test/ -- is dropped, so the count
+        # printed above is the one to read the two below against.
+        subset: dict[str, list[Path]] = {"train": [], "val": []}
+        for image in images:
+            if name := _shipped_split(image):
+                subset[name].append(image)
+        # One-sided means a layout mismatch -- this repo's own `images/<split>/`,
+        # or split names this map does not know -- not a dataset. Crash rather
+        # than train on half of it.
+        assert subset["train"] and subset["val"], (
+            f"{root}: expected <split>/images/ with train/ and valid/, got "
+            f"train={len(subset['train'])} val={len(subset['val'])}")
     else:
         # Grouped, not per-image: an export that ships its own split has already
         # been split by someone, and both Roboflow ones split per image.
         subset = split_grouped(images, src.val_fraction, src.seed)
-        for name, items in subset.items():
-            (out / "images" / name).mkdir(parents=True, exist_ok=True)
-            (out / "labels" / name).mkdir(parents=True, exist_ok=True)
-            for image in items:
-                shutil.copy(image, out / "images" / name / image.name)
-                label = _label_for(image)
-                shutil.copy(label, out / "labels" / name / label.name)
-        # The cut is on group count, so the image-level fraction lands near
-        # val_fraction rather than on it. Print what it actually was.
-        n_val, n_train = len(subset["val"]), len(subset["train"])
-        print(f"train: {n_train} images, val: {n_val} images "
-              f"({n_val / (n_val + n_train):.1%}, target {src.val_fraction:.0%})")
+
+    for name, items in subset.items():
+        (out / "images" / name).mkdir(parents=True, exist_ok=True)
+        (out / "labels" / name).mkdir(parents=True, exist_ok=True)
+        for image in items:
+            shutil.copy(image, out / "images" / name / image.name)
+            label = _label_for(image)
+            (out / "labels" / name / label.name).write_text(_boxed_label(label))
+
+    # split_grouped cuts on group count, so its image-level fraction lands near
+    # val_fraction rather than on it. Print what it actually was; a shipped split
+    # has no target to miss.
+    n_val, n_train = len(subset["val"]), len(subset["train"])
+    target = "" if src.val_fraction is None else f", target {src.val_fraction:.0%}"
+    print(f"train: {n_train} images, val: {n_val} images "
+          f"({n_val / (n_val + n_train):.1%}{target})")
 
     data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
     print(f"data.yaml: {data_yaml}")

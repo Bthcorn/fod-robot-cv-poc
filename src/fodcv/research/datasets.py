@@ -156,8 +156,14 @@ SOURCES["arg-bolts-4"] = YoloSource(
     # against fod-a-clean's by exact string, so `bolt` and `screw` score against
     # the holdout's own boxes instead of falling through to `unknown`.
     class_names={0: "bolt", 1: "nut", 2: "screw", 3: "washer"},
-    val_fraction=0.15,
 )
+
+# The re-cut split artifacts/arg-bolts-4-480* were trained on, kept so that
+# choice stays available. It reproduces the old SPLIT and not the old NUMBERS:
+# prep now repairs the mixed box/polygon labels (see _boxed_label), which
+# rewrote 26% of this export's instances, so 0.6414 mAP50 is not reachable by
+# any code path here any more. It was a score against broken ground truth.
+SOURCES["arg-bolts-4-grouped"] = replace(SOURCES["arg-bolts-4"], val_fraction=0.15)
 
 # A-J as the export names them. The source documents no meaning for the
 # letters, and inventing one would make every REPORT wrong in a way no metric
@@ -166,7 +172,6 @@ SOURCES["arg-bolts-4"] = YoloSource(
 SOURCES["fastener-7"] = YoloSource(
     source_dir=Path("~/Downloads/Fastener.v1i.yolov11").expanduser(),
     class_names={0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "J"},
-    val_fraction=0.15,
 )
 
 
