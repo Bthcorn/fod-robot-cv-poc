@@ -48,31 +48,40 @@ def main():
                         "measurement; PRD O-3 and M-3 set the real one")
     args = p.parse_args()
 
+    hold = CAM_TO_DRUM_M / V_SLOW
     with Vision(hef=args.hef, lookahead=tuple(args.lookahead)) as vision:
         print(f"classes  {vision.classes}")
         print(f"frame    {vision.frame_size}, lookahead {vision.lookahead}")
-        print(f"holding  {CAM_TO_DRUM_M / V_SLOW:.2f}s after the zone clears\n")
+        print(f"holding  {hold:.2f}s after the zone clears\n")
 
         deadline = time.monotonic() + args.seconds
         hold_until = 0.0
         commanded = None
+        was_blocked = False
         while (now := time.monotonic()) < deadline:
             # A stalled camera is not a clear floor. Halting on age is the robot's
             # call, not this package's -- Vision only reports how stale it is.
+            # `age` is inf until the first frame lands, which is a wait, not a fault.
             if vision.age > 0.5:
-                print(f"!! STOP -- vision stalled, {vision.age:.2f}s since the last frame")
+                print("!! STOP -- no frame yet" if vision.frame_id == 0
+                      else f"!! STOP -- vision stalled, {vision.age:.2f}s since the last frame")
                 time.sleep(1 / args.hz)
                 continue
 
-            if vision.zone_blocked():
+            blocked = vision.zone_blocked()
+            if blocked:
                 # Re-armed every frame the zone is blocked, so the timer measures
                 # from when the object *left* the zone, not when it entered.
-                hold_until = now + CAM_TO_DRUM_M / V_SLOW
+                hold_until = now + hold
+            elif was_blocked:
+                # The only moment the hold-off is visible: speed does not change
+                # here, it changes `hold` seconds later.
+                print(f"     zone clear, holding {hold:.2f}s")
+            was_blocked = blocked
             speed = V_SLOW if now < hold_until else V_FAST
 
             if speed != commanded:  # only the edges; steady state is not news
-                held = "" if vision.zone_blocked() else f" (holding {hold_until - now:.2f}s)"
-                print(f"SPEED {speed:.2f}{held}"
+                print(f"SPEED {speed:.2f}"
                       + "".join(f"\n    #{t.id:<3} {t.cls:<8} {t.conf:.2f} {t.state:<7} {t.action}"
                                 for t in vision.latest()))
                 commanded = speed
