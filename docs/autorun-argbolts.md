@@ -85,6 +85,42 @@ never for one run, or the comparison is confounded and the sweep is wasted.
 
 ---
 
+## If this is a rented pod
+
+The sweep is ~30 h and `m` is ~20 h of it, which is what makes renting a 4090
+cheaper than occupying a desktop for a day. Three things about that:
+
+**The Hailo wheel is not needed here and must not be looked for.** `.hef`
+compilation is not part of training — it runs later, on the Mac or WSL, via
+`hailo-compile/hailo-compile.sh`, which mounts the DFC wheel from the host's
+`~/Downloads`. `pyproject.toml` carries no Hailo dependency at all, so
+`uv sync --extra research` on a pod installs nothing related to it. An agent
+that tries to obtain the DFC here is solving a problem that does not exist.
+
+**The dataset is an upload, not a download.** The Roboflow export is ~789 MB and
+already on the Mac as `~/Downloads/ARG_Bolts_FV.v3i.yolov11.zip`. Send that
+rather than re-exporting from Roboflow — no account on the pod, no API key, no
+expiring link:
+
+```bash
+scp ~/Downloads/ARG_Bolts_FV.v3i.yolov11.zip pod:/workspace/
+# on the pod -- ~/Downloads is what datasets.py resolves via expanduser()
+mkdir -p ~/Downloads && unzip -q /workspace/ARG_Bolts_FV.v3i.yolov11.zip \
+  -d ~/Downloads/ARG_Bolts_FV.v3i.yolov11
+```
+
+Put it on a persistent network volume, not the pod's ephemeral disk — the pod
+gets destroyed when the sweep ends. Do not upload `data/arg-bolts-4/` instead:
+prep is deterministic, so rebuilding from the zip on the pod gives a
+byte-identical split, and the zip is the file that already exists.
+
+**Only `best.pt` comes back** — 5.2 MB for yolo11n, ~19 MB for s, ~40 MB for m.
+Everything else in `runs/` is scratch. Copy each to the same path on the Mac and
+migrate there, where the export toolchain and the Pi live.
+
+On Linux the default PyPI torch is already the CUDA build, so the cu-index step
+in Preconditions does not apply and cannot be undone by `uv sync`.
+
 ## Launch
 
 Background it and keep the log. The run outlives any agent session.
