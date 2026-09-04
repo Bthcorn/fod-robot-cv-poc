@@ -63,7 +63,7 @@ operator's call and nobody else's.
 | GPU | RTX 4090, 24 GB — enough for `yolo11m` at `batch=16`, which is what keeps the sweep a fair comparison |
 | RAM | ≥ 31 GB — also covers `cache=ram` (14.0 GB) if the GPU turns out starved |
 | Disk | **≥ 60 GB.** Dataset zip 0.8 + prepared 0.8 + runs ~5 + uv venv ~8 + DFC venv ~10 (TensorFlow, torch, the 0.5 GB wheel) + artifacts ~2 |
-| Image | Ubuntu 22.04 base. **`python3.10` must exist** — the DFC venv is built with it |
+| Image | **`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`.** Jammy's system `python3` is 3.10, which is what the DFC venv is built with (`hailo-compile-wsl.sh:90`). Any 22.04 template does; a 24.04 one needs the PPA in Stage 0 |
 
 Disk is the one that bites. A pod template sized for training alone will run out
 during the DFC install, ~10 h in.
@@ -85,11 +85,54 @@ command -v sudo || { apt-get update && apt-get install -y sudo; }
 command -v python3.10 || { apt-get install -y python3.10 python3.10-venv; }
 ```
 
+The image's own Python and its preinstalled torch are never used — `uv sync`
+builds its own venv, and the DFC venv is built from `python3.10` — so the `py3.11`
+and `torch 2.4.0` in that tag decide nothing. The distro is the only part of it
+that matters. `devel` ships nvcc and roughly doubles the image; nothing here
+compiles CUDA, so that is disk and nothing else.
+
+### If the template is Ubuntu 24.04
+
+RunPod's current PyTorch templates are noble — `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`
+and friends. Training does not care: `uv sync` builds its own venv, so the image's
+Python and its preinstalled torch are never used. **The compile does care.** Noble
+ships `python3.12` only, so the `python3.10` line above finds nothing to install
+and fails — not at minute 2, but at Stage 4, after the sweep has already been paid
+for. Add the PPA:
+
+```bash
+apt-get update && apt-get install -y software-properties-common
+add-apt-repository -y ppa:deadsnakes/ppa && apt-get update
+apt-get install -y python3.10 python3.10-venv
+python3.10 -V     # must print 3.10.x before anything else starts
+```
+
+Run that check **before Stage 1**, not before Stage 4. It costs two minutes on a
+cold pod and it is the whole difference between finding out now and finding out
+ten hours in. If it does not print a version, take a 22.04 template instead —
+same GPU, and it is the environment `hailo-compile-wsl.sh` was written against.
+Whether DFC 3.34's own dependency set installs cleanly on noble is untested here;
+22.04 is the known-good path and the cheaper bet.
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh && . "$HOME/.local/bin/env"
+export UV_CACHE_DIR=/workspace/.uv-cache    # see below -- must share a filesystem with .venv
 uv sync --extra research --extra export     # export brings gdown; research brings ultralytics
-uv run pytest -q                            # expect 151 passed
+uv run pytest -q                            # 149 passed, 2 skipped on Linux (151 on the Mac)
 ```
+
+`UV_CACHE_DIR` is not tidiness. uv unpacks each wheel into its cache and then
+*hardlinks* those files into `.venv`, which is instant and costs no extra bytes.
+Hardlinks cannot cross filesystems, so a cache on the container disk and a venv
+on the network volume makes uv fall back to copying every file — measured here as
+~15 GB of `.venv` written over MooseFS one small file at a time, against a 9.3 GB
+cache left behind on `/`. Bulk throughput is not the problem (the volume does
+1.1 GB/s sequential); ~50k metadata round-trips are. Point the cache at whichever
+filesystem holds the venv and the copy disappears.
+
+Budget `.venv` at **~15 GB**, not the 8 GB a training-only install suggests: the
+`export` extra brings torch (858 MB) plus cuBLAS 567, cuSPARSE 275, cuSOLVER 255,
+NCCL 307, ai-edge-tensorflow 256 and jaxlib 83.
 
 On Linux the default PyPI torch is already the CUDA build — the cu-index step
 the Windows path needs does not apply here. Confirm anyway:
