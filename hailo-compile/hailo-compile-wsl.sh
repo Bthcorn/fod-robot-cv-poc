@@ -48,6 +48,14 @@
 # if venv creation and pip installs feel sluggish.
 set -euxo pipefail
 
+# Same reason hailo-compile.sh:48 does it, and this script needs it twice over.
+# A pod or container root shell is not a login shell, so USER is unset: under
+# `set -u` the wheel-search list below expands $USER and aborts before the loop
+# body ever tests the cache path that would have matched. Survive that and the
+# DFC allocator still does os.environ["USER"] unguarded, dying with KeyError
+# ~18 min into place-and-route. Default it once, here.
+export USER="${USER:-root}"
+
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   build-essential libgl1 libglib2.0-0 graphviz python3.10-venv curl ca-certificates
