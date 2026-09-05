@@ -32,8 +32,12 @@ STOCK_WEIGHTS = "yolo11n.pt"
 # and NOT built from ROOT -- the robot pip-installs this package, which puts
 # ROOT inside site-packages, where no artifacts/ tree exists. The deploy bundle
 # is unpacked next to wherever the robot is run from, so cwd is the right anchor.
-DEPLOY_RUN = "poc-v2-480-full"
-DEPLOY_HEF = Path("artifacts") / DEPLOY_RUN / "bench_int8_hailo_model" / "best.hef"
+DEPLOY_RUN = "arg-bolts-4-n-640"
+# NOT bench_int8_hailo_model, which every other run uses. That directory in this
+# run holds the conf 0.001 build, which scores 0.0000 mAP50 -- see RESULT.md §13.
+# The working build is the 0.0001 one and the name says so on purpose: a future
+# compile writing the canonical name must not silently become the deploy target.
+DEPLOY_HEF = Path("artifacts") / DEPLOY_RUN / "bench_int8_hailo_model_conf00001" / "best.hef"
 
 # The only scene-disjoint holdout in artifacts/: 263 images from 250 FOD-A scenes
 # that contributed no training frame to poc-v1 or poc-v2. Every other run's eval/

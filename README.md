@@ -189,14 +189,18 @@ The `.hef` is gitignored. Ship three files, ~7.8 MB, as a release asset on the s
 robot pins — not an rsync, so "which model is on the board" has an answer:
 
 ```
-tar czf poc-v2-480-full.tar.gz \
-  artifacts/poc-v2-480-full/run.json \
-  artifacts/poc-v2-480-full/bench_int8_hailo_model/
-gh release create v0.2.0 poc-v2-480-full.tar.gz
+tar czf arg-bolts-4-n-640.tar.gz \
+  artifacts/arg-bolts-4-n-640/run.json \
+  artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/
+gh release create v0.3.0 arg-bolts-4-n-640.tar.gz
 ```
 
 `run.json` and `nms_config.json` travel with the `.hef` because the class names and the
 input size are read off them at load time, not hardcoded.
+
+**Not `bench_int8_hailo_model/`.** That directory in this run holds the conf 0.001
+build, which scores 0.0000 mAP50 -- RESULT.md §13. The shipping build is the 0.0001
+variant and the bundle must carry that one.
 
 ## Export on the Mac, benchmark on the Pi
 

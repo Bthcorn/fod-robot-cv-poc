@@ -6,19 +6,27 @@ Every number here traces to a CSV under `runs/bench_pi/`. Where a figure must **
 
 ---
 
-## Current build — last changed 2026-09-06
+## Current build — changed 2026-09-06
 
-> **The code and the measurements disagree, and that is an open decision.**
+| | |
+|---|---|
+| **Ships** | **`arg-bolts-4-n-640`** — 4 fasteners, native **640**, baked NMS floor **0.0001** |
+| **Path** | `artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/best.hef` |
+| **Accuracy** | **0.7715** mAP50 — 99.3% of its `best.pt` (0.7769) on 200 images of its own eval split |
+| **Latency** | **24.4 ms** median, p95 25.9, **40.9 FPS** — inside the 33 ms frame |
+| **Classes** | `bolt`, `nut`, `screw`, `washer` — all four map to `PICK` (`policy.ACTIONS`) |
+| **Replaced** | `poc-v2-480-full` (FOD-A, 4 classes, 480), which shipped through §4–§6 |
 
-| | build | measured |
-|---|---|---|
-| **What ships today** | `poc-v2-480-full` — FOD-A, 4 classes, 480, floor 0.001 | `paths.py:35` `DEPLOY_RUN`. Unchanged since the v2 work in §4–§6 |
-| **What the numbers now favour** | `arg-bolts-4-n-640` — 4 fasteners, **native 640**, floor **0.0001** | **0.7715** mAP50 (99.3% of `best.pt`), **24.4 ms** / 40.9 FPS — inside the 33 ms frame |
+**The taxonomy changed with it.** FOD-A's `nail`/`screw`/`bolt`/`unknown` is gone;
+`nut` and `washer` are new and were added to `policy.ACTIONS` as `PICK` — without
+that, `action()` returns `IGNORE` for unlisted classes and the robot would detect
+half its classes and silently refuse to pick them. Every §4–§6 number below is
+the **old** model on a different dataset and does not describe what ships.
 
-Repointing `DEPLOY_RUN` has **not** been done. The two models answer different
-questions — FOD-A is `nail`/`screw`/`bolt`/`unknown` on runway debris,
-`arg-bolts-4` is `bolt`/`nut`/`screw`/`washer` — so this is a scope decision,
-not a drop-in swap. See §13.
+> **`DEPLOY_HEF` deliberately does not use the canonical `bench_int8_hailo_model`
+> directory.** In this run that directory holds the conf 0.001 build, which scores
+> **0.0000**. The deploy path names the 0.0001 variant explicitly so a future
+> compile writing the canonical name cannot silently become the deploy target.
 
 **Alternates, if the shipping build does not suit:**
 
@@ -28,12 +36,12 @@ not a drop-in swap. See §13.
 | `arg-bolts-4-n-640` @ 480 | 0.7159 | **16.6 ms** | when the control loop needs the other 8 ms |
 | `arg-bolts-4-s-640` a16 | 0.6549 | 50.2 ms | **misses the 33 ms frame** — only if ~20 FPS is acceptable |
 
-**Changed 2026-09-06.** The default Hailo compile threshold moved from `0.001`
-to `0.0001` (`matrix.py`). At 0.001 this model scored **0.0000** mAP50 and was
-misdiagnosed as quantization damage across two sessions; the value is not the
-inference filter its name implies. Any `.hef` in `artifacts/` compiled before
-this date at 640 with a 0.001 floor is dead and must be rebuilt, not re-gated.
-480 builds are unaffected. Full account in §13.
+**Also changed 2026-09-06.** The default Hailo compile threshold moved from
+`0.001` to `0.0001` (`matrix.py`). At 0.001 this model scored **0.0000** mAP50
+and was misdiagnosed as quantization damage across two sessions; the value is
+not the inference filter its name implies. Any `.hef` in `artifacts/` compiled
+before this date at 640 with a 0.001 floor is dead and must be rebuilt, not
+re-gated. 480 builds are unaffected. Full account in §13.
 
 ---
 
@@ -388,9 +396,11 @@ Each one line, each carrying the number that justifies it. This is where the sup
 - **Scene-grouped splitting** before that data is trained on. A per-image shuffle cannot produce a trustworthy score on video-derived data, and arena footage will be video-derived too.
 - **`--angle-aug`**, still never run.
 - **A USB power meter**, to replace the PMIC estimate.
-- **`paths.py`'s `DEPLOY_RUN` still points at `poc-v2-480-full`** while §13's
-  numbers favour `arg-bolts-4-n-640`. The classes differ, so it is a scope
-  decision rather than a swap — but it should be taken deliberately, not left.
+- **The deployed model changed taxonomy on 2026-09-06** and nothing downstream
+  has been re-validated against it. `docs/INTEGRATION.md` and the slide deck
+  still describe FOD-A's `nail`/`screw`/`bolt`/`unknown`. `unknown` was the
+  `REPORT` class and `arg-bolts-4` has no equivalent, so the robot now has no
+  "possible debris, do not pick" category at all.
 - **Why the baked NMS floor changes produced scores.** Measured and reproducible; the mechanism is undocumented by both Hailo and Ultralytics. See §13.
 - **`s` a8 rebuilt at `conf=0.0001`** — the one experiment that separates `--a16-cls` from the floor. ~35 min, ~$0.45.
 - **`arg-bolts-4` retrained at 480.** The 480 build scores 0.7159 on weights that only ever saw 640; part of the missing 8% should come back.

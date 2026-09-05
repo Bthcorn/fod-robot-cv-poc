@@ -35,16 +35,16 @@ debug in week 11.
 The `.hef` is not in git. Grab the release bundle for the same tag:
 
 ```bash
-gh release download v0.2.0 && tar xzf poc-v2-480-full.tar.gz
+gh release download v0.3.0 && tar xzf arg-bolts-4-n-640.tar.gz
 ```
 
 Three files, ~7.8 MB, and all three must stay in that layout — the class names and
 the input size are read from the two JSONs, not hardcoded:
 
 ```
-artifacts/poc-v2-480-full/
+artifacts/arg-bolts-4-n-640/
 ├── run.json                       class names + which dataset trained them
-└── bench_int8_hailo_model/
+└── bench_int8_hailo_model_conf00001/
     ├── best.hef                   the model
     └── nms_config.json            input size, class count, compiled threshold
 ```
@@ -70,7 +70,7 @@ import asyncio, time
 from fodcv.runtime.vision import Vision
 
 CAM_TO_DRUM_M = 0.22        # tape measure on the built chassis (PRD O-3)
-HEF = "artifacts/poc-v2-480-full/bench_int8_hailo_model/best.hef"
+HEF = "artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/best.hef"
 
 with Vision(hef=HEF, lookahead=(0.5, 1.0)) as vision:
     hold_until = 0.0

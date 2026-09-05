@@ -60,6 +60,8 @@ ACTIONS = {
     "nail": "PICK",
     "screw": "PICK",
     "bolt": "PICK",
+    "nut": "PICK",     # arg-bolts-4, the deployed taxonomy
+    "washer": "PICK",  # ferrous like the rest -- the magnet lifts it
     "fod": "PICK",
     "unknown": "REPORT",  # 53% of FOD-A and the class that fires on furniture
 }
