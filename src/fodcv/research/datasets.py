@@ -55,13 +55,11 @@ class VocSource:
 
 @dataclass(frozen=True)
 class YoloSource:
-    """An already-labelled YOLO export. Copied in and validated, not converted."""
+    """An already-labelled YOLO export, carrying its own train/val split. Copied
+    in and validated, not converted -- the shipped split is taken verbatim."""
 
     source_dir: Path
     class_names: dict[int, str]
-    # None = the export already has its own train/val split; otherwise we split.
-    val_fraction: float | None = None
-    seed: int = 0
 
 
 SOURCES: dict[str, VocSource | YoloSource] = {
@@ -136,19 +134,19 @@ SOURCES["fod-a-1-neg"] = replace(SOURCES["fod-a-1"], background_max=9360)
 # --- Roboflow YOLOv11 exports ---
 #
 # Both ship `<split>/images/` and their own train/valid/test cut. That cut is
-# taken as shipped -- val_fraction stays None -- and test/ is dropped, because
-# the published mAP these are measured against was trained that way.
+# taken as shipped and test/ is dropped, because the published mAP these are
+# measured against was trained that way.
 #
 # What that buys is a comparable number, not a clean one. Their `valid/` splits
 # overlap their own `train/` by 14.5% (arg-bolts, 368 of 2535) and 25.6%
 # (fastener-7). Measured 2026-09-03, the overlap is *scene*-level, not duplicate
 # frames: the same plate on the same carpet at the same pose, with the fasteners
-# rearranged -- different objects, different boxes. ahash cannot tell those
-# apart; the plate dominates a 16x16 whole-frame hash.
+# rearranged -- different objects, different boxes. A whole-frame average hash
+# cannot tell those apart; the plate dominates it.
 #
 # So read arg-bolts-4's val mAP against the dataset page's 90.6%, and NOT as a
-# scene-disjoint score. When a scene-disjoint one is wanted, prepare
-# arg-bolts-4-grouped.
+# scene-disjoint score. The only scene-disjoint number this project has comes
+# from fodcv-eval against the fod-a-clean holdout -- see paths.HOLDOUT_DIR.
 
 SOURCES["arg-bolts-4"] = YoloSource(
     source_dir=Path("~/Downloads/ARG_Bolts_FV.v3i.yolov11").expanduser(),
@@ -157,13 +155,6 @@ SOURCES["arg-bolts-4"] = YoloSource(
     # the holdout's own boxes instead of falling through to `unknown`.
     class_names={0: "bolt", 1: "nut", 2: "screw", 3: "washer"},
 )
-
-# The re-cut split artifacts/arg-bolts-4-480* were trained on, kept so that
-# choice stays available. It reproduces the old SPLIT and not the old NUMBERS:
-# prep now repairs the mixed box/polygon labels (see _boxed_label), which
-# rewrote 26% of this export's instances, so 0.6414 mAP50 is not reachable by
-# any code path here any more. It was a score against broken ground truth.
-SOURCES["arg-bolts-4-grouped"] = replace(SOURCES["arg-bolts-4"], val_fraction=0.15)
 
 # A-J as the export names them. The source documents no meaning for the
 # letters, and inventing one would make every REPORT wrong in a way no metric

@@ -3,6 +3,9 @@
 
     uv run --with python-pptx python slides/build_slides.py
 
+The .pptx it writes is gitignored -- it is build output, and every figure in it
+comes from a file that is committed.
+
 python-pptx is fetched into a throwaway environment rather than added to the
 project: nothing else here needs it, and the project already uses that pattern
 for LiteRT export (research/export.py:export_litert).

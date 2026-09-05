@@ -154,45 +154,6 @@ def test_split_with_no_subset_size_keeps_everything():
 # --------------------------------------------------------------------------
 
 
-def images(tmp_path, patterns):
-    """One 32x32 JPEG per pattern seed. The same seed twice is a near-duplicate.
-
-    Noise, not a flat fill: ahash thresholds each frame on its own mean, so all
-    uniform images collide and a flat fixture would prove nothing.
-    """
-    import numpy as np
-    from PIL import Image
-
-    out = []
-    for i, pattern in enumerate(patterns):
-        path = tmp_path / f"img{i}.jpg"
-        rng = np.random.default_rng(pattern)
-        Image.fromarray(rng.integers(0, 256, (32, 32), dtype=np.uint8)).save(path)
-        out.append(path)
-    return out
-
-
-def test_near_duplicates_land_on_the_same_side(tmp_path):
-    """The whole point: RESULT.md section 7's 74% inflation is what a per-image
-    shuffle does to a dataset with duplicate clusters in it."""
-    # Two clusters of three: the same pattern seed is the same picture.
-    paths = images(tmp_path, [10, 10, 10, 200, 200, 200])
-    cut = dataset.split_grouped(paths, val_fraction=0.5, seed=0)
-    for cluster in (set(paths[:3]), set(paths[3:])):
-        assert cluster <= set(cut["train"]) or cluster <= set(cut["val"])
-    assert len(cut["train"]) + len(cut["val"]) == 6
-
-
-def test_grouped_split_does_not_depend_on_input_order(tmp_path):
-    """The split must be identical on the Mac and the Windows box. Ordering
-    groups by path instead of by hash is RESULT.md:310's bug, which absolute
-    paths differing per machine would bring straight back."""
-    paths = images(tmp_path, [1, 2, 3, 4, 5, 6])
-    forward = dataset.split_grouped(paths, val_fraction=0.5, seed=0)
-    reverse = dataset.split_grouped(list(reversed(paths)), val_fraction=0.5, seed=0)
-    assert {k: sorted(v) for k, v in forward.items()} == {k: sorted(v) for k, v in reverse.items()}
-
-
 def write_ann_dir(tmp_path, spec):
     """A VOC Annotations dir from {stem: category}, one object per file."""
     ann_dir = tmp_path / "Annotations"

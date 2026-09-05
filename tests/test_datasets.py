@@ -47,11 +47,7 @@ def test_available_reports_kind_and_prepared_state():
 
 
 def write_image(path, pattern):
-    """A real, decodable JPEG -- split_grouped hashes pixels, not bytes.
-
-    Patterned, not a flat fill: ahash thresholds on the frame's own mean, so
-    every uniform image collides with every other one whatever its colour.
-    """
+    """A real, decodable JPEG -- validate_yolo_export opens them."""
     import numpy as np
     from PIL import Image
 
@@ -75,8 +71,6 @@ def make_export(root, n=4, class_id=0, layout="repo"):
         base = root / ROBOFLOW_SPLITS[i % 3] if layout == "roboflow" else root
         (base / "images").mkdir(parents=True, exist_ok=True)
         (base / "labels").mkdir(parents=True, exist_ok=True)
-        # Distinct fills, so each image is its own ahash group and the split
-        # cuts where val_fraction says rather than landing lopsided.
         write_image(base / "images" / f"img{i}.jpg", i)
         (base / "labels" / f"img{i}.txt").write_text(f"{class_id} 0.5 0.5 0.2 0.2\n")
     return root
@@ -140,10 +134,10 @@ def test_an_export_with_no_images_at_all_is_rejected(tmp_path):
 def registered(tmp_path, monkeypatch):
     """A YOLO source registered under a throwaway id, building into tmp_path."""
     monkeypatch.setattr("fodcv.paths.DATA_DIR", tmp_path / "data")
-    monkeypatch.setitem(SOURCES, "scratch-a", YoloSource(
-        source_dir=make_export(tmp_path / "src-a"), class_names={0: "thing"}, val_fraction=0.5))
-    monkeypatch.setitem(SOURCES, "scratch-b", YoloSource(
-        source_dir=make_export(tmp_path / "src-b"), class_names={0: "thing"}, val_fraction=0.5))
+    for name in ("a", "b"):
+        monkeypatch.setitem(SOURCES, f"scratch-{name}", YoloSource(
+            source_dir=make_export(tmp_path / f"src-{name}", n=6, layout="roboflow"),
+            class_names={0: "thing"}))
     return tmp_path / "data"
 
 
@@ -154,7 +148,7 @@ def test_preparing_a_second_dataset_leaves_the_first_alone(registered):
     dataset.prepare("scratch-b")
     assert (registered / "scratch-a" / "data.yaml").exists()
     assert (registered / "scratch-b" / "data.yaml").exists()
-    assert len(list((registered / "scratch-a" / "images").rglob("*.jpg"))) == 4
+    assert len(list((registered / "scratch-a" / "images").rglob("*.jpg"))) == 4  # test/ dropped
 
 
 def test_preparing_over_an_existing_dataset_refuses(registered):
@@ -181,7 +175,7 @@ def test_prepared_yolo_dataset_is_split_and_yaml_written(registered):
 
 
 def test_a_shipped_split_is_taken_verbatim_and_valid_becomes_val(tmp_path, monkeypatch):
-    """val_fraction=None: no re-cut, and Roboflow's `valid/` lands as our `val/`.
+    """No re-cut, and Roboflow's `valid/` lands as our `val/`.
 
     The rename is the part that fails silently -- an unmapped split name just
     produces a smaller dataset, with a plausible-looking count. `test/` is
@@ -190,7 +184,7 @@ def test_a_shipped_split_is_taken_verbatim_and_valid_becomes_val(tmp_path, monke
     monkeypatch.setattr("fodcv.paths.DATA_DIR", tmp_path / "data")
     src_root = make_export(tmp_path / "src", n=6, layout="roboflow")
     monkeypatch.setitem(SOURCES, "scratch-shipped", YoloSource(
-        source_dir=src_root, class_names={0: "thing"}, val_fraction=None))
+        source_dir=src_root, class_names={0: "thing"}))
 
     dataset.prepare("scratch-shipped")
     out = tmp_path / "data" / "scratch-shipped"
@@ -202,12 +196,11 @@ def test_a_shipped_split_is_taken_verbatim_and_valid_becomes_val(tmp_path, monke
 
 
 def test_a_shipped_split_the_resolver_cannot_read_is_rejected(tmp_path, monkeypatch):
-    """This repo's own images/<split>/ layout under val_fraction=None. Half a
-    dataset is worse than a crash: it would train and report a number."""
+    """This repo's own images/<split>/ layout, which ships no train/valid dirs.
+    Half a dataset is worse than a crash: it would train and report a number."""
     monkeypatch.setattr("fodcv.paths.DATA_DIR", tmp_path / "data")
     monkeypatch.setitem(SOURCES, "scratch-flat", YoloSource(
-        source_dir=make_export(tmp_path / "flat"), class_names={0: "thing"},
-        val_fraction=None))
+        source_dir=make_export(tmp_path / "flat"), class_names={0: "thing"}))
     with pytest.raises(AssertionError, match="expected <split>/images/"):
         dataset.prepare("scratch-flat")
 
@@ -254,14 +247,12 @@ def test_an_empty_label_file_stays_empty(tmp_path):
     assert dataset._boxed_label(lab) == ""
 
 
-def test_arg_bolts_takes_its_shipped_split_and_grouped_keeps_the_old_one():
-    """The 0.6414 baseline was measured on the re-cut split; the retrain is on
-    the shipped one. Two ids, so both stay reproducible."""
-    assert source("arg-bolts-4").val_fraction is None
-    assert source("fastener-7").val_fraction is None
-    assert source("arg-bolts-4-grouped").val_fraction == 0.15
-    assert (source("arg-bolts-4-grouped").source_dir
-            == source("arg-bolts-4").source_dir)
+def test_the_roboflow_exports_carry_their_own_split():
+    """YoloSource has no val_fraction to set: the shipped train/valid cut is the
+    one every published mAP on these datasets was measured against."""
+    for name in ("arg-bolts-4", "fastener-7"):
+        assert not hasattr(source(name), "val_fraction")
+        assert source(name).source_dir.name.endswith(".yolov11")
 
 
 def test_fod_a_7_splits_the_unknown_bucket_without_changing_the_image_set():

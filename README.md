@@ -154,7 +154,7 @@ Three things worth knowing from here:
 and no targeting, so nothing steers toward an object and FR-15 makes the homography
 optional. The robot needs one boolean per frame: is a confirmed detection in the strip of
 floor it is about to drive over. `latest()` returns `Target(id, state, action, cls, conf,
-box, centroid, misses)` for logging and the telemetry heatmap, not for the main path.
+box, centroid)` for logging and the telemetry heatmap, not for the main path.
 
 **`state` and `action` are two fields on purpose.** `state` is `IGNORE`/`CAUTION`/`CONFIRM`
 — confidence smoothed over frames by the hysteresis in `runtime/policy.py`. `action` is
@@ -219,28 +219,24 @@ Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/
 
 ### Compiling the Hailo `.hef`
 
-Buildable neither on the Pi nor natively on the Mac: it needs an x86-64 Linux Dataflow Compiler under emulation. `bash -s` reads the script on stdin and cannot also take positional arguments, so parameters go through the environment.
+Buildable neither on the Pi nor on the Mac: the Dataflow Compiler is x86-64 Linux only, with no aarch64 or macOS build. So it runs where the training already does — a rented pod, WSL2, or any Linux box. Parameters go through the environment.
 
 ```
-docker --context desktop-linux run --platform linux/amd64 --rm -i \
-  -v "$PWD":/work -w /work -v "$HOME/Downloads":/wheels:ro \
-  -v hailo-pipcache:/root/.cache/pip \
-  -e HEF_RUN=poc-v2-480 -e HEF_DATASET=fod-a-3k -e HEF_IMGSZ=480 -e HEF_CONF=0.10 \
-  python:3.10-slim bash -s < hailo-compile/hailo-compile.sh
+HEF_RUN=arg-bolts-4-n-640 HEF_DATASET=arg-bolts-4 HEF_IMGSZ=640 \
+  bash hailo-compile/hailo-compile.sh
 ```
 
-The Dataflow Compiler wheel is taken from the mounted `Downloads` folder when it's there. Hailo's Developer Zone is login-gated, so nothing can fetch it automatically — set `HEF_WHEEL_URL` to your own mirror and the scripts download it once and cache it (the pip-cache volume under Docker, `~/.cache/hailo-compile/` under WSL2), verified against `HEF_WHEEL_SHA256`, which defaults to the sha256 of the 3.34.0 wheel these results were built with. A mismatch aborts before install. No mirror URL is committed: the DFC is proprietary and this repo is public.
+Every `HEF_*` variable is optional: unset, it falls through to the Python-side default (`paths.CURRENT_RUN`, `matrix.IMGSZ`, `matrix.FMT_EXTRA_ARGS`), so there is one place a default lives. `HEF_GPU=1` runs the quantization-aware fine-tuning step on an NVIDIA card — the slow part — and needs a real CUDA driver, which on Windows means the NVIDIA **WSL**-CUDA driver on the host, nothing inside WSL. Read the `tf.config.list_physical_devices('GPU')` line the script prints: an empty list is a silent CPU fallback, which succeeds but costs 26–86 min on that step.
 
-All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-negotiable details are documented at the top of `hailo-compile/hailo-compile.sh`: **Docker Desktop, not OrbStack** (OrbStack's Rosetta exposes no AVX and TensorFlow aborts on import), `-i` or the script reads EOF and exits 0 having run nothing, and **≥10 GB of VM RAM** or Layer Noise Analysis is SIGKILLed ~18 min in with no message.
+From Windows, `hailo-compile/hailo-compile.ps1` passes the same variables into the default WSL distro and runs the script there. Requires WSL2 with Ubuntu 22.04.
 
-Windows options, same `HEF_*` variables both ways:
+The Dataflow Compiler wheel is not on PyPI and Hailo's Developer Zone is login-gated, so nothing can fetch it automatically. Point `HEF_WHEEL` at a downloaded wheel, or drop it in `~/.cache/hailo-compile/` or `~/Downloads/` and the script finds it. Set `HEF_WHEEL_URL` to your own mirror instead and it downloads once, cached in `~/.cache/hailo-compile/`, verified against `HEF_WHEEL_SHA256` — which defaults to the sha256 of the 3.34.0 wheel these results were built with. A mismatch aborts before install. No mirror URL is committed: the DFC is proprietary and this repo is public.
 
-- **Docker** (`hailo-compile/hailo-compile.ps1`) -- identical container payload, PowerShell syntax. No Rosetta/AVX concern, amd64 runs natively.
-- **WSL2, no Docker** (`hailo-compile/hailo-compile-wsl.ps1` / `.sh`) -- installs the DFC wheel into a persistent WSL2 venv, one less layer than Docker. `HEF_GPU=1` runs the fine-tuning step on an NVIDIA GPU via WSL2's CUDA passthrough (needs the NVIDIA WSL-CUDA driver on the Windows host, nothing inside WSL). Verified working on a RunPod box, where the same script takes the no-Docker path against a real CUDA driver -- DFC 3.34.0's TF pin does have matching `tensorflow[and-cuda]` wheels. Still read the `tf.config.list_physical_devices('GPU')` line the script prints: an empty list is a silent CPU fallback, which succeeds but costs 26-86 min on that step.
+End-to-end runbook for a rented box, dataset through `.hef`: [`docs/autorun-runpod-e2e.md`](docs/autorun-runpod-e2e.md).
 
-Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it inside the emulated container. 510 images ≈ 26 min; 2,550 ≈ 86 min.
+Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it. 510 images ≈ 26 min CPU-only; 2,550 ≈ 86 min. `HEF_GPU=1` is what those numbers are worth paying to avoid.
 
-`--conf` is compiled into the `.hef` and on the Pi acts as a **floor** that inference can only filter above. The matrix default is 0.001 so a benchmark row keeps its low-confidence tail and stays comparable to the host-NMS backends; a deploy build wants something usable instead. Verify the result on the board with `hailortcli parse-hef <best.hef>` — it prints the architecture, the score threshold and the class count.
+`--conf` is compiled into the `.hef` and on the Pi acts as a **floor** that inference can only filter above. The matrix default is 0.0001, low enough to keep a benchmark row's tail and comparable to the host-NMS backends. It is not the filter its name implies — at 640 a 0.001 floor scores 0.0000 mAP50 on the same weights (RESULT.md §13) — so do not raise it for a deploy build; filter host-side with `--conf` instead. Verify the result on the board with `hailortcli parse-hef <best.hef>` — it prints the architecture, the score threshold and the class count.
 
 ## Run protocol on the Pi
 

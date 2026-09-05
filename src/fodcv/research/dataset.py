@@ -23,8 +23,6 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-import numpy as np
-
 from fodcv.paths import CURRENT_DATASET, DATA_DIR, dataset_dir, dataset_yaml
 from fodcv.research.datasets import HOLDOUT_STEMS, SOURCES, VocSource, YoloSource, source
 
@@ -65,43 +63,6 @@ def split(items: list, val_fraction: float, seed: int, subset_size: int | None =
         items = items[:subset_size]
     n_val = int(len(items) * val_fraction)
     return {"val": items[:n_val], "train": items[n_val:]}
-
-
-def ahash(path: Path) -> bytes:
-    """16x16 average hash. Two frames of the same scene collide, different
-    scenes do not.
-
-    ponytail: a whole-frame average hash, not scene metadata -- a Roboflow
-    export carries no scene id, and this is what actually measured the leak.
-    Ceiling: it groups near-identical *frames*, not a camera lock that panned.
-    Upgrade to grouping on collection metadata when the arena dataset lands
-    (docs/dataset-roadmap.md).
-    """
-    from PIL import Image  # ultralytics already brings pillow; research/ only
-
-    a = np.asarray(Image.open(path).convert("L").resize((16, 16)), dtype=np.float32)
-    return (a > a.mean()).tobytes()
-
-
-def split_grouped(images: list[Path], val_fraction: float, seed: int) -> dict[str, list[Path]]:
-    """Split so a near-duplicate cluster never spans train and val.
-
-    Splitting per image puts the same frame on both sides and inflates val mAP.
-    RESULT.md section 7 measures that at 74% on fod-a-3k, and both Roboflow
-    exports registered here arrive with 14-26% of their own val already
-    present in their own train.
-
-    Groups are ordered by hash, NOT by path: the shuffle below must see the
-    same sequence on every machine, and absolute paths differ between them.
-    That is RESULT.md:310's bug -- filesystem order feeding the shuffle, so one
-    seed drew two different splits -- and it would come straight back here.
-    """
-    groups: dict[bytes, list[Path]] = {}
-    for image in images:
-        groups.setdefault(ahash(image), []).append(image)
-    ordered = [sorted(g) for _, g in sorted(groups.items())]
-    cut = split(ordered, val_fraction, seed)
-    return {name: [p for group in items for p in group] for name, items in cut.items()}
 
 
 def _claim_output(dataset: str, force: bool) -> Path:
@@ -370,24 +331,19 @@ def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
     assert root.is_dir(), f"no such directory: {root}"
     images = validate_yolo_export(root, src.class_names)
     print(f"{len(images)} labelled images in {root}")
-    if src.val_fraction is None:
-        # The export already carries its own split; take it verbatim. Anything
-        # SHIPPED_SPLITS does not name -- test/ -- is dropped, so the count
-        # printed above is the one to read the two below against.
-        subset: dict[str, list[Path]] = {"train": [], "val": []}
-        for image in images:
-            if name := _shipped_split(image):
-                subset[name].append(image)
-        # One-sided means a layout mismatch -- this repo's own `images/<split>/`,
-        # or split names this map does not know -- not a dataset. Crash rather
-        # than train on half of it.
-        assert subset["train"] and subset["val"], (
-            f"{root}: expected <split>/images/ with train/ and valid/, got "
-            f"train={len(subset['train'])} val={len(subset['val'])}")
-    else:
-        # Grouped, not per-image: an export that ships its own split has already
-        # been split by someone, and both Roboflow ones split per image.
-        subset = split_grouped(images, src.val_fraction, src.seed)
+    # The export carries its own split; take it verbatim. Anything SHIPPED_SPLITS
+    # does not name -- test/ -- is dropped, so the count printed above is the one
+    # to read the two below against.
+    subset: dict[str, list[Path]] = {"train": [], "val": []}
+    for image in images:
+        if name := _shipped_split(image):
+            subset[name].append(image)
+    # One-sided means a layout mismatch -- this repo's own `images/<split>/`, or
+    # split names this map does not know -- not a dataset. Crash rather than
+    # train on half of it.
+    assert subset["train"] and subset["val"], (
+        f"{root}: expected <split>/images/ with train/ and valid/, got "
+        f"train={len(subset['train'])} val={len(subset['val'])}")
 
     for name, items in subset.items():
         (out / "images" / name).mkdir(parents=True, exist_ok=True)
@@ -397,13 +353,9 @@ def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
             label = _label_for(image)
             (out / "labels" / name / label.name).write_text(_boxed_label(label))
 
-    # split_grouped cuts on group count, so its image-level fraction lands near
-    # val_fraction rather than on it. Print what it actually was; a shipped split
-    # has no target to miss.
     n_val, n_train = len(subset["val"]), len(subset["train"])
-    target = "" if src.val_fraction is None else f", target {src.val_fraction:.0%}"
     print(f"train: {n_train} images, val: {n_val} images "
-          f"({n_val / (n_val + n_train):.1%}{target})")
+          f"({n_val / (n_val + n_train):.1%})")
 
     data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
     print(f"data.yaml: {data_yaml}")

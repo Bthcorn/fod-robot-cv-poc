@@ -14,11 +14,10 @@ adds only what is different about doing it on a pod and compiling there.
 
 ## Why the pod can do the whole thing
 
-The Dataflow Compiler is x86_64-Linux-only, which is why the Mac needs Docker
-(`hailo-compile/hailo-compile.sh`) and the Pi cannot compile its own `.hef` at
-all. **A RunPod box is already x86_64 Linux**, so it takes the no-Docker path,
-`hailo-compile/hailo-compile-wsl.sh` — written for "WSL2 Ubuntu 22.04, or any
-real Linux box", which a pod is.
+The Dataflow Compiler is x86_64-Linux-only, which is why neither the Mac nor the
+Pi can compile its own `.hef` at all. **A RunPod box is already x86_64 Linux**, so
+`hailo-compile/hailo-compile.sh` runs on it unchanged — it is written for "a rented
+pod, WSL2 Ubuntu 22.04, or any real Linux box".
 
 Two things fall out of that:
 
@@ -34,7 +33,7 @@ Two things fall out of that:
 
 ## Secrets: the two links do not go in this repo
 
-`hailo-compile.sh:14` and `hailo-compile-wsl.sh:29` both say it outright — *"No
+`hailo-compile.sh` says it outright — *"No
 mirror URL is committed here: the DFC is proprietary and gated, and this repo is
 public."* That is a deliberate decision, not an oversight.
 
@@ -63,7 +62,7 @@ operator's call and nobody else's.
 | GPU | RTX 4090, 24 GB — enough for `yolo11m` at `batch=16`, which is what keeps the sweep a fair comparison |
 | RAM | ≥ 31 GB — also covers `cache=ram` (14.0 GB) if the GPU turns out starved |
 | Disk | **≥ 60 GB.** Dataset zip 0.8 + prepared 0.8 + runs ~5 + uv venv ~8 + DFC venv ~10 (TensorFlow, torch, the 0.5 GB wheel) + artifacts ~2 |
-| Image | **`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`.** Jammy's system `python3` is 3.10, which is what the DFC venv is built with (`hailo-compile-wsl.sh:90`). Any 22.04 template does; a 24.04 one needs the PPA in Stage 0 |
+| Image | **`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`.** Jammy's system `python3` is 3.10, which is what the DFC venv is built with (`hailo-compile.sh:90`). Any 22.04 template does; a 24.04 one needs the PPA in Stage 0 |
 
 Disk is the one that bites. A pod template sized for training alone will run out
 during the DFC install, ~10 h in.
@@ -77,7 +76,7 @@ git clone https://github.com/Bthcorn/fod-robot-cv-poc.git ~/cv-poc && cd ~/cv-po
 git checkout feat/robot-vision-seam
 ```
 
-Pods run as root and often ship no `sudo`, which `hailo-compile-wsl.sh` calls.
+Pods run as root and often ship no `sudo`, which `hailo-compile.sh` calls.
 Give it one rather than editing the script:
 
 ```bash
@@ -110,7 +109,7 @@ python3.10 -V     # must print 3.10.x before anything else starts
 Run that check **before Stage 1**, not before Stage 4. It costs two minutes on a
 cold pod and it is the whole difference between finding out now and finding out
 ten hours in. If it does not print a version, take a 22.04 template instead —
-same GPU, and it is the environment `hailo-compile-wsl.sh` was written against.
+same GPU, and it is the environment `hailo-compile.sh` was written against.
 Whether DFC 3.34's own dependency set installs cleanly on noble is untested here;
 22.04 is the known-good path and the cheaper bet.
 
@@ -160,7 +159,7 @@ unzip -q /tmp/argbolts.zip -d ~/Downloads/ARG_Bolts_FV.v3i.yolov11 && rm /tmp/ar
 ```
 
 ```bash
-# Wheel -> the FIRST path hailo-compile-wsl.sh searches, so neither HEF_WHEEL
+# Wheel -> the FIRST path hailo-compile.sh searches, so neither HEF_WHEEL
 # nor HEF_WHEEL_URL is needed. HEF_WHEEL_URL would take the curl path, which
 # cannot survive the Drive interstitial.
 mkdir -p ~/.cache/hailo-compile
@@ -243,10 +242,10 @@ uv run fodcv-migrate --from runs/arg-bolts-4-n-640 --run arg-bolts-4-640 --datas
 HEF_RUN=arg-bolts-4-640 \
 HEF_DATASET=arg-bolts-4 \
 HEF_IMGSZ=640 \
-HEF_CONF=0.001 \
+HEF_CONF=0.0001 \
 HEF_FRACTION=0.3 \
 HEF_GPU=1 \
-bash hailo-compile/hailo-compile-wsl.sh
+bash hailo-compile/hailo-compile.sh
 ```
 
 Every one of those is load-bearing:
@@ -276,11 +275,11 @@ Every one of those is load-bearing:
   same calibration scored 0.4170 and 0.417, so the gate is reliable enough to
   settle it in about an hour.
 
-- **`HEF_CONF=0.001`** keeps the benchmark row comparable to the host-NMS
-  backends. A **deploy** `.hef` wants 0.10–0.25 instead — the compiled value is
-  a floor on the Pi that `--conf` can only filter above, so shipping 0.001 means
-  shipping a model that cannot be made quieter. Compile the deploy one
-  separately when the run is chosen; do not guess which the operator wants.
+- **`HEF_CONF=0.0001`** is the matrix default and what a deploy `.hef` wants.
+  **Do not raise it.** The compiled value is not the inference filter its name
+  implies: at 640 the same weights score 0.7715 mAP50 at 0.0001 and **0.0000**
+  at 0.001, and the band is monotonic — 0.15 is dead too. Filter host-side with
+  `--conf` on the Pi instead. Full account in RESULT.md §13.
 
 **`HEF_GPU=1` works.** It was written unverified — DFC 3.34.0's pinned
 TensorFlow is gated behind the Developer Zone, so nobody could check it had

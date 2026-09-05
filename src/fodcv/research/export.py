@@ -17,7 +17,6 @@ Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 
 import contextlib
-import json
 import re
 import subprocess
 from pathlib import Path
@@ -99,33 +98,17 @@ def a16_classification_head():
 
     Ultralytics offers no hook: quantize='w8a16' is rejected for hailo (it is not in
     W8A16_FORMATS) and export_hailo assembles its model script inline. So intercept
-    the script on its way into the DFC and append one line. The cls layers are the
-    ones the script already names in change_output_activation(..., sigmoid) -- reading
-    them back out beats hardcoding conv54/65/80, which are per-model names.
+    the script on its way into the DFC -- `ClientRunner.load_model_script` is the
+    only seam -- and append one line.
 
     Costs latency and size. Only worth it for a head that measurably lost its scores.
-    """
-    with model_script_patch(cls_layers_to_a16):
-        yield
-
-
-@contextlib.contextmanager
-def model_script_patch(*rewrites):
-    """Rewrite the DFC model script on its way out of Ultralytics.
-
-    `export_hailo` assembles the script inline and exposes no hook, so the only
-    seam is `ClientRunner.load_model_script`. Every variant this project needs --
-    widening the class head, raising the optimization level -- is a string
-    rewrite, so they compose rather than each needing its own interceptor.
     """
     from hailo_sdk_client import ClientRunner  # compile host only; absent on the Mac
 
     original = ClientRunner.load_model_script
 
     def patched(self, script, *args, **kwargs):
-        for rewrite in rewrites:
-            script = rewrite(script)
-        return original(self, script, *args, **kwargs)
+        return original(self, cls_layers_to_a16(script), *args, **kwargs)
 
     ClientRunner.load_model_script = patched
     try:
@@ -134,69 +117,19 @@ def model_script_patch(*rewrites):
         ClientRunner.load_model_script = original
 
 
-@contextlib.contextmanager
-def a16_all_outputs():
-    """a16_w16 on every output layer, regression convs included.
-
-    `cls_layers_to_a16` widens only the sigmoid-activated class convs. If the box
-    regression is also losing its range, the class head being 16-bit cannot show
-    it -- both halves feed the same on-chip NMS.
-    """
-    with model_script_patch(all_outputs_to_a16):
-        yield
-
-
-@contextlib.contextmanager
-def optimization_level(level: int):
-    """Raise the DFC's optimization level above Ultralytics' hardcoded 2.
-
-    Levels 3-4 add bias correction and AdaRound, which target exactly the failure
-    this project is chasing: a narrow layer whose activation range does not
-    survive 8-bit. Higher levels cost compile time, not runtime.
-    """
-    with model_script_patch(lambda script: raise_optimization_level(script, level)):
-        yield
-
-
 def cls_layers_to_a16(script: str) -> str:
-    """Append a 16-bit precision line for the class convs named in `script`."""
+    """Append a 16-bit precision line for the class convs named in `script`.
+
+    The cls layers are the ones the script already names in
+    change_output_activation(..., sigmoid) -- reading them back out beats
+    hardcoding conv54/65/80, which are per-model names.
+    """
     layers = re.findall(r"change_output_activation\((\w+), sigmoid\)", script)
     # No sigmoid lines means the head shape changed under us and we would be
     # compiling an unmodified a8 script while reporting an a16 build.
     assert layers, f"no sigmoid class layers found in model script:\n{script}"
     print(f"  a16 class head: {', '.join(layers)}")
     return f"{script}\nquantization_param([{', '.join(layers)}], precision_mode=a16_w16)"
-
-
-def all_outputs_to_a16(script: str) -> str:
-    """Append a 16-bit precision line for every output conv the script names.
-
-    Both branches, not just the sigmoid ones: `nms_config.json` pairs each
-    regression conv with a class conv, and the chip's NMS consumes both.
-    """
-    cls = re.findall(r"change_output_activation\((\w+), \w+\)", script)
-    assert cls, f"no output layers found in model script:\n{script}"
-    # The regression convs are not named in the script -- only the sigmoid class
-    # convs are. Both appear in the nms_config.json the script points at, which
-    # is the file the chip's NMS is configured from.
-    config = re.search(r'nms_postprocess\("([^"]+)"', script)
-    assert config, f"no nms_postprocess line to read reg layers from:\n{script}"
-    decoders = json.loads(Path(config.group(1)).read_text())["bbox_decoders"]
-    layers = sorted(set(cls) | {d["reg_layer"] for d in decoders})
-    print(f"  a16 all outputs: {', '.join(layers)}")
-    return f"{script}\nquantization_param([{', '.join(layers)}], precision_mode=a16_w16)"
-
-
-def raise_optimization_level(script: str, level: int) -> str:
-    """Rewrite `model_optimization_flavor(optimization_level=N)` in place.
-
-    Ultralytics hardcodes 2. Substituting rather than appending, because a second
-    flavor line would be a silent conflict rather than an override.
-    """
-    out, n = re.subn(r"optimization_level=\d+", f"optimization_level={level}", script)
-    assert n == 1, f"expected one optimization_level in model script, rewrote {n}:\n{script}"
-    print(f"  optimization level -> {level}")
-    return out
 
 
 def check_quantized(manifest: dict, manifest_path: Path, formats: list[str]):
@@ -253,7 +186,7 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
         precisions=None, imgsz=IMGSZ, force=False, conf=None, calib_fraction=None,
-        a16_cls=False, a16_all=False, opt_level=None):
+        a16_cls=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -301,13 +234,8 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                         if calib_fraction is not None and takes_calibration(fmt, quantize):
                             extra["fraction"] = calib_fraction
                         with contextlib.ExitStack() as stack:
-                            if fmt == "hailo":
-                                if a16_cls:
-                                    stack.enter_context(a16_classification_head())
-                                if a16_all:
-                                    stack.enter_context(a16_all_outputs())
-                                if opt_level is not None:
-                                    stack.enter_context(optimization_level(opt_level))
+                            if fmt == "hailo" and a16_cls:
+                                stack.enter_context(a16_classification_head())
                             path = YOLO(str(weights)).export(
                                 format=fmt,
                                 imgsz=imgsz,

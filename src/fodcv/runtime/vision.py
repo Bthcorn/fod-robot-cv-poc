@@ -59,7 +59,7 @@ WARMUP = 5  # frames excluded from the timing stats
 
 #: What the robot loop consumes. `state` is confidence over time, `action` is what
 #: the class means -- see fodcv.runtime.policy for why they are two fields.
-Target = namedtuple("Target", "id state action cls conf box centroid misses")
+Target = namedtuple("Target", "id state action cls conf box centroid")
 
 
 # --- pure helpers, all unit-tested off the Pi ------------------------------------
@@ -87,18 +87,18 @@ def class_names(hef_path):
     return names
 
 
-def hef_imgsz(hef_path, fallback=480):
+def hef_imgsz(hef_path):
     """The .hef's input size, off the nms_config.json the hailo export writes
-    beside it.
+    beside it. 480 when there is no such file -- the size every build predating
+    it was compiled at.
 
-    A property of the build, not something a caller should carry: fodcv.matrix
-    defaults exports to 640 and hailo-compile.sh passes 480, so the two disagree
-    by default and the mismatch has no symptom worth the name -- the letterbox
-    just hands the chip the wrong square.
+    A property of the build, not something a caller should carry. A caller that
+    guesses has no symptom worth the name -- the letterbox just hands the chip
+    the wrong square.
     """
     config = Path(hef_path).with_name("nms_config.json")
     if not config.exists():
-        return fallback
+        return 480
     dims = json.loads(config.read_text())["image_dims"]
     assert dims[0] == dims[1], f"{config} declares a non-square input {dims}; letterbox assumes square"
     return int(dims[0])
@@ -213,8 +213,7 @@ def to_targets(tracks):
     none when the thing being decided is where to put a magnet."""
     return [
         Target(id=t.id, state=t.state(), action=t.action(), cls=t.cls,
-               conf=t.ema_conf, box=getattr(t, "box", None),
-               centroid=t.centroid, misses=t.misses)
+               conf=t.ema_conf, box=getattr(t, "box", None), centroid=t.centroid)
         for t in tracks if t.misses == 0
     ]
 
@@ -314,9 +313,7 @@ class Vision:
         A dead camera must not read as "no debris, keep patrolling", so the error
         surfaces here rather than in a log nobody is watching.
         """
-        self._raise_if_failed()
-        with self._lock:
-            return list(self._targets)
+        return self.snapshot()[1]
 
     def zone_blocked(self):
         """Is a confirmed target in the lookahead strip? The speed policy's only input.
@@ -370,9 +367,6 @@ class Vision:
     def set_rotate(self, degrees):
         assert degrees in (0, 90, 180, 270)
         self.rotate = degrees
-
-    def set_classes(self, names):
-        self._shown = {self.classes.index(n) for n in names}
 
     def toggle_class(self, name):
         if name in self.classes:

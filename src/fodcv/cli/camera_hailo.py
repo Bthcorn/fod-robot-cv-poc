@@ -115,7 +115,7 @@ def text(shot, string, org, scale, color, thickness=2):
 STATE_COLOURS = {"CONFIRM": (80, 220, 80), "CAUTION": (0, 200, 255), "IGNORE": (170, 170, 170)}
 
 
-def draw(shot, targets, vision):
+def draw(shot, targets):
     for t in targets:
         if t.box is None:
             continue
@@ -278,7 +278,7 @@ def main():
             if not (saving or args.preview):
                 continue
             shot = frame.copy()
-            draw(shot, targets, vision)
+            draw(shot, targets)
             if saving:
                 cv2.imwrite(str(out_dir / f"frame_{seen:04d}.jpg"), shot)
                 print(f"  frame {seen:4d}  {len(targets)} detection(s)  -> frame_{seen:04d}.jpg")
