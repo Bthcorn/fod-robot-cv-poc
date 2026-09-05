@@ -19,8 +19,8 @@ CAUTION screw and a CAUTION shard both mean "slow down"; only the class says whi
 one the magnet can lift. Fusing the two into one enum loses the half FR-4 needs.
 
 stdlib only, on purpose: this ships to the Pi's system python3.11, where neither
-ultralytics nor torch exists. The webcam demo that used to live here is in
-`fodcv/cli/confidence_policy.py`.
+ultralytics nor torch exists. `fodcv.runtime.vision` is what drives it there;
+tests/test_policy.py is how the thresholds are exercised without hardware.
 """
 
 import math

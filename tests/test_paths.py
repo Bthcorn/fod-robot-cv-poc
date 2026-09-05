@@ -8,20 +8,6 @@ def test_run_dir_and_weights_agree(monkeypatch, tmp_path):
     assert paths.run_eval_yaml("poc-v9") == tmp_path / "artifacts" / "poc-v9" / "eval" / "data.yaml"
 
 
-def test_resolve_weights_prefers_the_published_run(monkeypatch, tmp_path):
-    monkeypatch.setattr(paths, "ARTIFACTS_DIR", tmp_path / "artifacts")
-    weights = paths.run_weights("poc-v9")
-    weights.parent.mkdir(parents=True)
-    weights.write_bytes(b"model")
-    assert paths.resolve_weights("poc-v9") == str(weights)
-
-
-def test_resolve_weights_falls_back_to_stock(monkeypatch, tmp_path):
-    """A demo with nothing published still runs, on the COCO model."""
-    monkeypatch.setattr(paths, "ARTIFACTS_DIR", tmp_path / "artifacts")
-    assert paths.resolve_weights("poc-v9") == paths.STOCK_WEIGHTS
-
-
 def test_dataset_paths_all_hang_off_one_directory(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
     root = tmp_path / "data" / "fod-a"

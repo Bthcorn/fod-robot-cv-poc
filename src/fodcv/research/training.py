@@ -1,17 +1,14 @@
-"""Fine-tune trial: proves the train->eval loop runs end to end on MPS. A
-plumbing check, not an accuracy result -- real training is PRD §10, on the full
-self-collected dataset.
-
---angle-aug adds viewpoint-robustness augmentation to counter the gazing-angle
-confidence drop, since FOD-A's viewpoint mix does not match PRD §9's low,
-forward-tilted mount. Separate run dir, so v1 stays comparable.
+"""Fine-tune one run. Device is auto-detected: CUDA on a pod or a WSL2 box, MPS
+on the Mac, CPU otherwise.
 
 `overrides` is any Ultralytics train argument, straight through, applied last --
-so a sweep can vary one hyperparameter without a flag per knob, and can split
-ANGLE_AUG_HYP's bundle (perspective is the viewpoint knob; degrees is roll and
-scale is zoom jitter). scripts/train_plan.sh is the sweep that uses it.
+so a sweep can vary one hyperparameter without a flag per knob. That is also why
+there is no --angle-aug bundle any more: of its four knobs only `perspective` is
+a viewpoint knob, `degrees` is camera roll a fixed mount does not have, and
+`scale=0.6` shrinks an already-small object. scripts/train_plan.sh phase C
+sweeps perspective alone, which is what that bundle should have been.
 
-Output is Ultralytics scratch in `runs/train_<dataset>[_aug]/`, not the deploy
+Output is Ultralytics scratch in `runs/train_<dataset>/`, not the deploy
 unit -- publish it with `fodcv-migrate --from <that dir>`.
 """
 
@@ -19,10 +16,6 @@ import torch
 from ultralytics import YOLO
 
 from fodcv.paths import CURRENT_DATASET, ROOT, STOCK_WEIGHTS, dataset_yaml
-
-# v2 angle-robustness knobs -- 0/default in v1.
-ANGLE_AUG_HYP = dict(degrees=15, shear=8, perspective=0.0008, scale=0.6)
-
 
 def _device() -> str:
     """CUDA on WSL2/Linux boxes with an NVIDIA GPU, MPS on the Mac, else CPU."""
@@ -34,7 +27,6 @@ def _device() -> str:
 
 
 def run(
-    angle_aug: bool = False,
     dataset: str = CURRENT_DATASET,
     weights: str = STOCK_WEIGHTS,
     name: str | None = None,
@@ -48,7 +40,7 @@ def run(
     # Dataset in the run dir name, so training two datasets does not overwrite
     # one with the other. A sweep passes --name instead: it varies things the
     # dataset id cannot see, and exist_ok=True would overwrite the previous cell.
-    run_name = name or (f"train_{dataset}_aug" if angle_aug else f"train_{dataset}")
+    run_name = name or f"train_{dataset}"
     train_kwargs = dict(
         data=str(data_yaml),
         imgsz=640,
@@ -58,8 +50,6 @@ def run(
         name=run_name,
         exist_ok=True,
     )
-    if angle_aug:
-        train_kwargs.update(ANGLE_AUG_HYP)
     train_kwargs.update(overrides)
 
     # One line per run, because a sweep's log is otherwise 12 indistinguishable

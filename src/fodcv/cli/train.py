@@ -27,11 +27,6 @@ def setting(text: str) -> tuple[str, object]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--angle-aug",
-        action="store_true",
-        help="v2: add viewpoint-robustness augmentation, separate run dir",
-    )
     parser.add_argument("--dataset", default=CURRENT_DATASET,
                         help=f"dataset to train on (default: {CURRENT_DATASET})")
     parser.add_argument("--model", default=STOCK_WEIGHTS, dest="weights",
@@ -44,7 +39,7 @@ def main():
                         help="any Ultralytics train argument, repeatable: "
                              "--set epochs=60 --set imgsz=480 --set seed=1")
     args = parser.parse_args()
-    training.run(angle_aug=args.angle_aug, dataset=args.dataset, weights=args.weights,
+    training.run(dataset=args.dataset, weights=args.weights,
                  name=args.name, **dict(args.overrides))
 
 

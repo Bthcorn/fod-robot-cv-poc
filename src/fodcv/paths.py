@@ -85,13 +85,3 @@ def run_eval_yaml(run: str = CURRENT_RUN) -> Path:
 def run_metadata(run: str = CURRENT_RUN) -> Path:
     """Provenance: which dataset this run was trained on. See migrate_artifacts."""
     return run_dir(run) / "run.json"
-
-
-def resolve_weights(run: str = CURRENT_RUN) -> str:
-    """Weights for a demo or live run: the run's if published, stock otherwise.
-
-    Export must NOT use this -- falling back to the stock COCO model would build
-    a whole artifact matrix for the wrong weights. It refuses instead.
-    """
-    weights = run_weights(run)
-    return str(weights) if weights.exists() else STOCK_WEIGHTS

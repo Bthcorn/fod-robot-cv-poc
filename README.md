@@ -33,7 +33,7 @@ uv sync --extra research --extra export --extra bench   # Mac: everything
 uv sync --extra research --extra bench                  # Pi: benchmark runtimes
 ```
 
-The Mac-only converters (`coremltools`, `litert-torch`, `nncf`, `pnnx`) are in the `export` extra because they do not install on aarch64 at all.
+The Mac-only converters (`nncf`, `pnnx`, `onnxslim`) are in the `export` extra because they do not install on aarch64 at all.
 
 `ultralytics` is in the **`research`** extra, not the base dependencies, so that base is `numpy` + `opencv-python` — see [The robot's interface](#the-robots-interface). Every command above the benchmark needs it, so add `--extra research` to anything that is not the robot.
 
@@ -60,9 +60,8 @@ uv run fodcv-export --run poc-v2-480 --imgsz 480   # runtime artifacts (Mac only
 Each of these cost a debugging session. None is a code bug.
 
 - **`uv` has no `pip`.** Ultralytics auto-installs a missing export dependency by shelling out to `pip`, which does not exist in a `uv`-managed venv — so it fails silently and the export reports a runtime error instead. Install every converter up front: `uv add pnnx nncf ncnn openvino mnn`. This trap recurs for every new export format.
-- **LiteRT cannot share this lockfile.** Ultralytics needs `litert-torch>=0.9.0`, which pins `typing-extensions<4.13` through `xdsl`, while `onnx>=1.22` requires `>=4.15`. Genuinely unsatisfiable, not a pin to loosen. `research/export.py:export_litert` runs only that cell in a throwaway `uv run --isolated --no-project` subprocess — the same thing Ultralytics itself does. Inference is unaffected.
-- **`litert-torch` downgrades torch** (2.13 → 2.9.1) as a side effect of its pin, and `nncf` downgrades numpy. MPS still works at 2.9.1.
-- **CoreML export fails** on this coremltools/torch/M4 combination — an attention block cannot be traced. Reproducible, not a misconfiguration. Mac-only format, irrelevant to a Pi target.
+- **LiteRT cannot share this lockfile**, and so is not in the `export` extra at all. Ultralytics needs `litert-torch>=0.9.0`, which pins `typing-extensions<4.13` through `xdsl`, while `onnx>=1.22` requires `>=4.15`. Genuinely unsatisfiable, not a pin to loosen. `research/export.py:export_litert` runs only that cell in a throwaway `uv run --isolated --no-project` subprocess — the same thing Ultralytics itself does. Inference is unaffected.
+- **`nncf` downgrades numpy.** Harmless here; MPS still works.
 - **macOS camera permission**: `cv2.VideoCapture` needs Privacy & Security → Camera granted to the hosting terminal app, or capture silently fails to open.
 
 ### Adding a dataset
@@ -84,14 +83,6 @@ Preparing writes only to `data/<dataset-id>/` and refuses to overwrite an existi
 
 **Before registering the arena dataset, read PRD §10 step 4 and the note above `arena-v1`.** `split()` is a plain per-image shuffle, which is wrong for anything video-derived — see RESULT.md on scene grouping, where FOD-A demonstrates the failure at 74%.
 
-Standalone (Mac camera, not part of the pipeline):
-
-```
-uv run fodcv-list-cameras  # list available camera indices
-uv run fodcv-camera [i]    # live webcam + inference, ctrl-C or 'q' to stop
-uv run fodcv-policy [src]  # hysteresis + temporal confidence smoothing demo
-```
-
 ## Commands
 
 Every command is a console script installed by `uv sync`. Names map one-to-one onto `src/fodcv/cli/`, declared in `pyproject.toml` under `[project.scripts]`.
@@ -100,13 +91,10 @@ Every command is a console script installed by `uv sync`. Names map one-to-one o
 |---|---|---|
 | `fodcv-prepare` | `cli/prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
 | `fodcv-smoke` | `cli/smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
-| `fodcv-train` | `cli/train.py` | Fine-tunes `--model` (default `yolo11n.pt`) on `--dataset` → `runs/train_<dataset>[_aug]/`, or `--name` when sweeping. CUDA/MPS/CPU auto-detected. `--set key=value` passes any Ultralytics train argument through (`--set epochs=60 --set imgsz=480 --set seed=1`). `--angle-aug` adds viewpoint-robustness augmentation and writes to a separate run dir. |
+| `fodcv-train` | `cli/train.py` | Fine-tunes `--model` (default `yolo11n.pt`) on `--dataset` → `runs/train_<dataset>/`, or `--name` when sweeping. CUDA/MPS/CPU auto-detected. `--set key=value` passes any Ultralytics train argument through (`--set epochs=60 --set imgsz=480 --set seed=1`), which is the only way viewpoint knobs are set — see `scripts/train_plan.sh` phase C. |
 | `fodcv-migrate` | `cli/migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
 | `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi.** `--conf` sets the score threshold compiled into a Hailo `.hef`; ignored by every other format, which take `conf=` at call time. |
 | `fodcv-bench` | `cli/bench_pi.py` | Runtime/precision benchmark, run **on the Pi 5**. Median + p95 latency, FPS, size and mAP per `{model} × {format} × {precision}`, plus the board conditions published benchmarks omit. `--soak N` runs sustained load instead of the matrix; `--no-val` skips mAP. |
-| `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test, Mac-only stand-in for the Pi's real camera. |
-| `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices. |
-| `fodcv-policy` | `cli/confidence_policy.py` | Confidence hysteresis + multi-frame EMA smoothing demo. |
 | `fodcv-hailo-camera` | `cli/camera_hailo.py` | Live Camera Module 3 → Hailo detection with a preview HUD, geometry readout and timing table. Run **on the Pi**, system interpreter. |
 | `fodcv-robot-stub` | `cli/robot_stub.py` | The robot's FR-4 loop with prints instead of motors. Run **on the Pi** to prove the seam. |
 

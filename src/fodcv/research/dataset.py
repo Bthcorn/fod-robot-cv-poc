@@ -243,16 +243,20 @@ def _prepare_voc(dataset: str, src: VocSource, out: Path) -> Path:
 # --- already-YOLO sources ---
 
 
-def _label_for(image: Path) -> Path:
-    """The YOLO convention: labels/ mirrors images/, same stem, .txt.
+def _images_index(image: Path) -> int:
+    """Where `images` sits in the path, counted from the RIGHT.
 
-    Locates `images` from the right, so this reads both layouts in use -- this
-    repo's `images/<split>/` and a Roboflow export's `<split>/images/`. Taking
-    it from the left instead would resolve a Roboflow path to
-    `labels/<split>/images/...`, which does not exist, and every image would
-    report a missing label.
+    Both layouts in use put it in a different place -- this repo's
+    `images/<split>/` and a Roboflow export's `<split>/images/`. Taking it from
+    the left instead resolves a Roboflow path to `labels/<split>/images/...`,
+    which does not exist, and every image reports a missing label.
     """
-    i = len(image.parts) - 1 - image.parts[::-1].index("images")
+    return len(image.parts) - 1 - image.parts[::-1].index("images")
+
+
+def _label_for(image: Path) -> Path:
+    """The YOLO convention: labels/ mirrors images/, same stem, .txt."""
+    i = _images_index(image)
     return Path(*image.parts[:i], "labels", *image.parts[i + 1:]).with_suffix(".txt")
 
 
@@ -264,8 +268,7 @@ SHIPPED_SPLITS = {"train": "train", "valid": "val", "val": "val"}
 
 def _shipped_split(image: Path) -> str | None:
     """`<split>/images/x.jpg` -> our split name, or None for a split we skip."""
-    i = len(image.parts) - 1 - image.parts[::-1].index("images")
-    return SHIPPED_SPLITS.get(image.parts[i - 1])
+    return SHIPPED_SPLITS.get(image.parts[_images_index(image) - 1])
 
 
 def _boxed_label(label: Path) -> str:
@@ -360,16 +363,3 @@ def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
     data_yaml = write_data_yaml(dataset_yaml(dataset), src.class_names)
     print(f"data.yaml: {data_yaml}")
     return data_yaml
-
-
-def summary(dataset: str = CURRENT_DATASET) -> dict:
-    """Counts for provenance. See migrate_artifacts' run.json."""
-    out = dataset_dir(dataset)
-    return {
-        "dataset": dataset,
-        # str keys: json stringifies int keys anyway, so be explicit rather than
-        # have run.json disagree with what was written.
-        "classes": {str(cid): name for cid, name in source(dataset).class_names.items()},
-        "train_images": len(list((out / "images" / "train").glob("*"))) if out.exists() else 0,
-        "val_images": len(list((out / "images" / "val").glob("*"))) if out.exists() else 0,
-    }

@@ -23,16 +23,15 @@ research = [
     "pyyaml>=6.0",
     "ultralytics>=8.4.115",
 ]
-# The Mac-side toolchain. Mostly converters, and none of those install on the
-# Pi -- litert-torch ships no aarch64 wheel and coremltools is Apple-only --
-# which is why export happens off-Pi and the artifacts are rsynced over. gdown
-# is the odd one out: it fetches the FOD-A zip for fodcv-prepare and would
-# install anywhere, but dataset prep is Mac-side too, so it rides along here
-# rather than earning a third extra.
+# The Mac-side toolchain. Converters that ship no aarch64 wheel, which is why
+# export happens off-Pi and the artifacts are rsynced over. No litert-torch:
+# research/export.py builds the .tflite in an isolated `uv run --with` env,
+# because its typing-extensions pin cannot share a lockfile with onnx>=1.22.
+# gdown is the odd one out -- it fetches the FOD-A zip for fodcv-prepare and
+# would install anywhere, but dataset prep is Mac-side too, so it rides along
+# here rather than earning a third extra.
 export = [
-    "coremltools>=9.0",
     "gdown>=6.1.0",
-    "litert-torch>=0.8.0",
     "nncf>=2.14.0",
     "onnx>=1.22.0",
     "onnxslim>=0.1.95",
@@ -61,10 +60,6 @@ fodcv-bench = "fodcv.cli.bench_pi:main"
 # Robot side. Base dependencies only -- these are what the Pi installs.
 fodcv-hailo-camera = "fodcv.cli.camera_hailo:main"
 fodcv-robot-stub = "fodcv.cli.robot_stub:main"
-# Demos and camera helpers.
-fodcv-policy = "fodcv.cli.confidence_policy:main"
-fodcv-camera = "fodcv.cli.camera_test:main"
-fodcv-list-cameras = "fodcv.cli.list_cameras:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -139,10 +139,11 @@ if want B; then
 fi
 
 # ---------------------------------------------------------------- C: viewpoint
-# --angle-aug bundles four knobs, and two are not viewpoint knobs: degrees is
-# camera ROLL (a fixed mount has none) and scale=0.6 is zoom jitter that shrinks
-# an already-small object. So sweep `perspective` alone, with roll cut to 5 and
-# scale left at default, or a win/loss cannot be attributed.
+# Sweep `perspective` alone, with roll cut to 5 and scale left at default, or a
+# win/loss cannot be attributed. The --angle-aug bundle this replaces moved four
+# knobs at once and two were not viewpoint knobs: degrees is camera ROLL (a fixed
+# mount has none) and scale=0.6 is zoom jitter that shrinks an already-small
+# object. It was deleted rather than fixed -- --set is the general form.
 #
 # perspective is in 1/pixel on coords centred at +/-W/2, so the tilt it draws
 # depends on canvas width: on the 2x mosaic canvas it is twice the strength of

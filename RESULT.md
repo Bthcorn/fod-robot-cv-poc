@@ -333,7 +333,7 @@ From the literature:
 
 **Synthesis:** at the target 15–30 cm height, a **shallow 10–25° down-tilt**, not the steep angles taller robots use. Test within that band first when resolving O-3.
 
-`--angle-aug` exists in `training.py` for exactly this (degrees/shear/perspective/scale) and **has still never been run.**
+The `--angle-aug` bundle existed in `training.py` for exactly this (degrees/shear/perspective/scale) and **was never run**; it has since been deleted, because only `perspective` of the four is a viewpoint knob at this mount. `scripts/train_plan.sh` phase C sweeps that one alone, and **has still never been run either.**
 
 ---
 
@@ -394,7 +394,7 @@ Each one line, each carrying the number that justifies it. This is where the sup
 - **A real cluttered-floor test.** The live result put fasteners on a plain sheet with clutter behind them. Debris lying *on* a textured arena floor is the case that matters and is still untested.
 - **The arena dataset** (PRD §10). Now the critical path, not an eventual refinement.
 - **Scene-grouped splitting** before that data is trained on. A per-image shuffle cannot produce a trustworthy score on video-derived data, and arena footage will be video-derived too.
-- **`--angle-aug`**, still never run.
+- **Viewpoint augmentation** — `train_plan.sh` phase C, still never run.
 - **A USB power meter**, to replace the PMIC estimate.
 - **The deployed model changed taxonomy on 2026-09-06** and nothing downstream
   has been re-validated against it. `docs/INTEGRATION.md` and the slide deck
