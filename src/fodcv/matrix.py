@@ -30,11 +30,26 @@ FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn", "hailo"]
 FMT_EXTRA_ARGS = {
     # name: the board is a Hailo-8 (26 TOPS). Unset, Ultralytics defaults to
     # hailo8l (13 TOPS) and compiles a .hef for the wrong part.
-    # conf: hailo bakes NMS into the .hef, so this threshold cannot be lowered at
-    # inference time. Match model.val()'s 0.001 or the hailo row loses its
-    # low-confidence tail and reads as a quantization loss. A deploy .hef wants
-    # it back up -- see fodcv-export --conf.
-    "hailo": {"name": "hailo8", "conf": 0.001},
+    # conf: hailo bakes NMS into the .hef and runs it ON CHIP, so this threshold
+    # cannot be lowered at inference time -- anything below it is discarded
+    # before the host sees a proposal.
+    #
+    # 0.0001, not the 0.001 that mirrors model.val(). That default produced two
+    # .hef that scored exactly 0.0000 mAP50 and were diagnosed for two sessions
+    # as quantization damage. Measured 2026-09-06, arg-bolts-4-n-640 at 640 over
+    # 200 images against best.pt's 0.7769, identical in every other respect:
+    #
+    #     conf 0.001    mAP50 0.0000    max score 0.007
+    #     conf 0.0001   mAP50 0.7715    max score 0.909
+    #
+    # Why a higher floor also lowers the scores the chip returns is unexplained.
+    # A filter cannot reduce the maximum of what it filters, so this value is
+    # doing something at compile time and not only at inference -- nms_config.json
+    # differs in this field alone and the DFC logs are identical. Measured, not
+    # understood: docs/session-2026-09-06-live-camera.md. Confirmed monotonic for
+    # this model -- 0.15 is dead too. A deploy .hef does NOT want this raised;
+    # filter host-side with --conf instead.
+    "hailo": {"name": "hailo8", "conf": 0.0001},
 }
 PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
 # fp16 off by default: a silent no-op on CPU. Stays selectable for NCNN, its
