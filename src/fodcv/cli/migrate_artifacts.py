@@ -14,7 +14,7 @@ artifacts/<run-id>/ from then on. What moves:
 Left behind on purpose: the un-claimed best.onnx (nothing points at it) and
 runs/detect/val* orphans. runs/ itself is untouched.
 
-    uv run fodcv-migrate --from runs/train_poc --run poc-v1
+    uv run fodcv-migrate --from runs/arg-bolts-4-n-640 --run arg-bolts-4-n-640
 """
 
 import argparse

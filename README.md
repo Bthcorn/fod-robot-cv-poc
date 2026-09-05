@@ -24,7 +24,7 @@ artifacts/<run-id>/ the deploy unit: weights, exports, manifest, eval split.
                     One rsync moves everything the Pi needs.
 ```
 
-Two ids, same shape. A **run-id** names one trained model, a **dataset-id** names one prepared dataset. Both default to a constant in `src/fodcv/paths.py` (`CURRENT_RUN`, `CURRENT_DATASET`) and both are overridable per command with `--run` / `--dataset`, so nothing grows a required argument.
+Two ids, same shape. A **run-id** names one trained model, a **dataset-id** names one prepared dataset. Both default to a constant in `src/fodcv/paths.py` — today `CURRENT_RUN = arg-bolts-4-n-640` and `CURRENT_DATASET = arg-bolts-4`, the shipping model and the data it was trained on — and both are overridable per command with `--run` / `--dataset`, so nothing grows a required argument. **They move as a pair**, because `--dataset` is what INT8 calibrates from and what the benchmark scores against; `artifacts/<run-id>/run.json` records which goes with which.
 
 ## Setup
 

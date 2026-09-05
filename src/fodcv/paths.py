@@ -22,14 +22,22 @@ ARTIFACTS_DIR = ROOT / "artifacts"
 
 # Bump these when a new run or dataset supersedes the old one, and every command
 # follows. Both are overridable per command with --run / --dataset.
-CURRENT_RUN = "poc-v1"
-CURRENT_DATASET = "fod-a"
+#
+# They move as a PAIR, always: the dataset is the one the run was trained on, and
+# it is what --dataset calibrates INT8 from and what bench falls back to for a
+# score. Bumping the run alone would calibrate a 4-fastener model on FOD-A and
+# hand it a differently-classed eval set -- check_class_agreement catches the
+# second half of that, nothing catches the first. artifacts/<run>/run.json is the
+# record of which dataset goes with which run.
+CURRENT_RUN = "arg-bolts-4-n-640"
+CURRENT_DATASET = "arg-bolts-4"
 
 STOCK_WEIGHTS = "yolo11n.pt"
 
-# The run the robot deploys, which is not CURRENT_RUN: that one defaults the
-# Mac-side pipeline, this one names the .hef on the board. Deliberately relative
-# and NOT built from ROOT -- the robot pip-installs this package, which puts
+# The run the robot deploys. Equal to CURRENT_RUN today and not the same thing:
+# that one defaults the Mac-side pipeline and moves the moment a new run is
+# trained, this one names the .hef on the board and moves only when one is
+# actually shipped. Deliberately relative and NOT built from ROOT -- the robot pip-installs this package, which puts
 # ROOT inside site-packages, where no artifacts/ tree exists. The deploy bundle
 # is unpacked next to wherever the robot is run from, so cwd is the right anchor.
 DEPLOY_RUN = "arg-bolts-4-n-640"

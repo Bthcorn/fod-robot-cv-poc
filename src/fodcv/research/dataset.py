@@ -331,7 +331,12 @@ def validate_yolo_export(root: Path, class_names: dict[int, str]) -> list[Path]:
 
 def _prepare_yolo(dataset: str, src: YoloSource, out: Path) -> Path:
     root = Path(src.source_dir).expanduser()
-    assert root.is_dir(), f"no such directory: {root}"
+    # A YoloSource is a manual download -- unlike a VocSource, nothing can fetch
+    # it. Say where it goes, or a bare `fodcv-prepare` on a fresh clone reports
+    # only a path that was never going to exist.
+    assert root.is_dir(), (
+        f"no export at {root} -- download the {dataset!r} YOLOv11 export and unzip "
+        f"it there. Which export each id means: research/datasets.py")
     images = validate_yolo_export(root, src.class_names)
     print(f"{len(images)} labelled images in {root}")
     # The export carries its own split; take it verbatim. Anything SHIPPED_SPLITS

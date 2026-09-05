@@ -12,7 +12,7 @@ quantization and shrinks the INT8 mAP drop AC-2 asks us to report.
 
 Which precisions each format supports: fodcv.matrix.
 
-Run:  uv run fodcv-export --run poc-v1
+Run:  uv run fodcv-export --run arg-bolts-4-n-640
 Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 

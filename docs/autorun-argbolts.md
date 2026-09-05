@@ -105,11 +105,12 @@ stage, and `pyproject.toml` carries no Hailo dependency at all — `uv sync
 that goes hunting for the DFC is solving a problem it does not have.
 
 Where that stage runs depends on which runbook is in play. Under this file it
-happens afterwards on the Mac or WSL, via `hailo-compile/hailo-compile.sh`,
-which mounts the wheel from the host's `~/Downloads`. Under
-`docs/autorun-runpod-e2e.md` it happens on this same pod at its Stage 4, and the
-wheel is fetched there — still not here, and still not before the sweep is
-launched.
+happens afterwards on another x86_64 Linux box — WSL2, or a second pod — via
+`hailo-compile/hailo-compile.sh`, which finds the wheel in `~/Downloads` or
+`~/.cache/hailo-compile/`. **Not on the Mac:** the Dataflow Compiler has no
+macOS build. Under `docs/autorun-runpod-e2e.md` it happens on this same pod at
+its Stage 4, and the wheel is fetched there — still not here, and still not
+before the sweep is launched.
 
 **Getting the dataset there — two ways, and the fast one is not the obvious
 one.** The export is ~789 MB. Whichever path is used, it must end up unzipped at

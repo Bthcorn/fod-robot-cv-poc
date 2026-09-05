@@ -12,7 +12,7 @@ row should read `reused`. An `exported` means the rsync missed and this cell is
 measuring a different file.
 
 Deploy, then run on the Pi 5:
-    rsync -a mac:cv-poc/artifacts/poc-v1/ artifacts/poc-v1/
+    rsync -a mac:cv-poc/artifacts/arg-bolts-4-n-640/ artifacts/arg-bolts-4-n-640/
     uv run fodcv-bench --threads 4                  # stage A, full matrix
     uv run fodcv-bench --models yolo26n.pt --precisions fp32   # stage B
     taskset -c 0-1 uv run fodcv-bench --formats ncnn --threads 2 --no-val
