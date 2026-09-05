@@ -386,14 +386,44 @@ and `dfc_v2_conf0001.log.gz` (0.0001, works) both report:
 Identical. The extra errors in the a8 log are that pod's package-install noise
 (`python3-tk`, `libgraphviz-dev`), not compile failures.
 
-**The constraint that matters.** Max score moved 0.909 -> 0.007 with only
-`nms_scores_th` changed. A threshold selects among scores; it cannot lower the
-highest one. So the value affects **how the model is built**, not what the chip
-discards at inference. That is what rules out the explanation currently written
-in `src/fodcv/matrix.py`.
+**The constraint that matters — now measured, not inferred.** An earlier
+revision of this section argued from a max score of 0.909 (the shipping build's
+README, first val image) against 0.007 (a probe of the a16 build over five
+different images). Those were not comparable. Probed properly — same five eval
+images, one session, the two builds differing only in the baked floor:
 
-It looks like the threshold entering a fixed-point scaling computation on the
-score path. **No log confirms that. Do not record it as the cause.**
+| build | floor | proposals | max score |
+|---|---:|---:|---:|
+| `bench_int8_hailo_model` | 0.001 | 5 | 0.0194 |
+| `_conf00001` | 0.0001 | **179** | **0.9166** |
+
+A threshold at 0.001 cannot discard a 0.9166 proposal. **So `nms_scores_th`
+changes what the compiled model produces, not what the chip drops at
+inference.** The conclusion survives the correction, on better evidence.
+
+### What the vendor docs say — checked 2026-09-06
+
+Neither source describes this behaviour. Both treat the parameter as an
+inference-time filter only:
+
+- **Ultralytics' Hailo export page** confirms export-time `conf` is baked into
+  the on-chip NMS and that its default is **0.25** — this project uses 0.001,
+  four orders of magnitude lower, which is well outside the documented usage.
+  It notes quantization shifts YOLO26 scores *down* by ~0.05 and advises
+  lowering `conf` to compensate. Ordinary score compression; nothing about the
+  threshold altering produced scores.
+- **Hailo community threads** consistently describe the value as baked at
+  compile time and unchangeable at runtime — which is why lowering a threshold
+  in application code has no effect. No thread describes it changing the scores
+  themselves.
+
+So the behaviour measured here is **undocumented**, not something the project
+misread. Worth reporting upstream if it reproduces on a clean example.
+
+One workaround appears repeatedly in those threads and is already noted in this
+project's plan as deferred: **compile without NMS** and decode host-side, which
+removes the baked threshold entirely. `export_hailo`'s `one2one` branch does
+this. It needs a host-side decoder in `Vision`, so it stays a separate project.
 
 ### Three ways to settle it, cheapest first
 
