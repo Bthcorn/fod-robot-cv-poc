@@ -30,11 +30,37 @@ FORMATS = ["onnx", "openvino", "ncnn", "litert", "mnn", "hailo"]
 FMT_EXTRA_ARGS = {
     # name: the board is a Hailo-8 (26 TOPS). Unset, Ultralytics defaults to
     # hailo8l (13 TOPS) and compiles a .hef for the wrong part.
-    # conf: hailo bakes NMS into the .hef, so this threshold cannot be lowered at
-    # inference time. Match model.val()'s 0.001 or the hailo row loses its
-    # low-confidence tail and reads as a quantization loss. A deploy .hef wants
-    # it back up -- see fodcv-export --conf.
-    "hailo": {"name": "hailo8", "conf": 0.001},
+    # conf: hailo bakes NMS into the .hef and runs it ON CHIP, so this threshold
+    # cannot be lowered at inference time -- anything below it is discarded
+    # before the host sees a proposal.
+    #
+    # 0.0001, not the 0.001 that mirrors model.val(). That default produced two
+    # .hef that scored exactly 0.0000 mAP50 and were diagnosed for two sessions
+    # as quantization damage. Measured 2026-09-06 on arg-bolts-4-n-640 at 640,
+    # 200 images, against best.pt's 0.7769 -- same weights, same calibration,
+    # same pod session, nms_config.json differing in this field alone:
+    #
+    #     conf 0.001    mAP50 0.0000
+    #     conf 0.0001   mAP50 0.7715
+    #
+    # This value is NOT a filter, whatever the name suggests. Probed over the
+    # same five eval images in one session, the two builds return:
+    #
+    #     floor 0.001     5 proposals   max score 0.0194
+    #     floor 0.0001  179 proposals   max score 0.9166
+    #
+    # A threshold at 0.001 cannot discard a 0.9166 proposal, so the floor is
+    # changing what the model produces, not what the chip drops. The mechanism
+    # is unexplained: the two DFC compile logs are byte-identical in their NMS
+    # handling. Not documented by Hailo or Ultralytics either -- both describe
+    # it only as a baked inference filter. See
+    # docs/session-2026-09-06-live-camera.md.
+    #
+    # Monotonic for this model, not a band: 0.15 is dead too, confirmed live.
+    # 480 is unaffected -- the same 0.001 floor scores 0.7159 there.
+    #
+    # A deploy .hef does NOT want this raised; filter host-side with --conf.
+    "hailo": {"name": "hailo8", "conf": 0.0001},
 }
 PRECISIONS = {"fp32": None, "fp16": 16, "int8": 8}
 # fp16 off by default: a silent no-op on CPU. Stays selectable for NCNN, its

@@ -6,6 +6,45 @@ Every number here traces to a CSV under `runs/bench_pi/`. Where a figure must **
 
 ---
 
+## Current build — changed 2026-09-06
+
+| | |
+|---|---|
+| **Ships** | **`arg-bolts-4-n-640`** — 4 fasteners, native **640**, baked NMS floor **0.0001** |
+| **Path** | `artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/best.hef` |
+| **Accuracy** | **0.7715** mAP50 — 99.3% of its `best.pt` (0.7769) on 200 images of its own eval split |
+| **Latency** | **24.4 ms** median, p95 25.9, **40.9 FPS** — inside the 33 ms frame |
+| **Classes** | `bolt`, `nut`, `screw`, `washer` — all four map to `PICK` (`policy.ACTIONS`) |
+| **Replaced** | `poc-v2-480-full` (FOD-A, 4 classes, 480), which shipped through §4–§6 |
+
+**The taxonomy changed with it.** FOD-A's `nail`/`screw`/`bolt`/`unknown` is gone;
+`nut` and `washer` are new and were added to `policy.ACTIONS` as `PICK` — without
+that, `action()` returns `IGNORE` for unlisted classes and the robot would detect
+half its classes and silently refuse to pick them. Every §4–§6 number below is
+the **old** model on a different dataset and does not describe what ships.
+
+> **`DEPLOY_HEF` deliberately does not use the canonical `bench_int8_hailo_model`
+> directory.** In this run that directory holds the conf 0.001 build, which scores
+> **0.0000**. The deploy path names the 0.0001 variant explicitly so a future
+> compile writing the canonical name cannot silently become the deploy target.
+
+**Alternates, if the shipping build does not suit:**
+
+| build | mAP50 | median | when to pick it |
+|---|---:|---:|---|
+| `arg-bolts-4-n-640` @ 640 | **0.7715** | 24.4 ms | default — best accuracy that fits the frame |
+| `arg-bolts-4-n-640` @ 480 | 0.7159 | **16.6 ms** | when the control loop needs the other 8 ms |
+| `arg-bolts-4-s-640` a16 | 0.6549 | 50.2 ms | **misses the 33 ms frame** — only if ~20 FPS is acceptable |
+
+**Also changed 2026-09-06.** The default Hailo compile threshold moved from
+`0.001` to `0.0001` (`matrix.py`). At 0.001 this model scored **0.0000** mAP50
+and was misdiagnosed as quantization damage across two sessions; the value is
+not the inference filter its name implies. Any `.hef` in `artifacts/` compiled
+before this date at 640 with a 0.001 floor is dead and must be rebuilt, not
+re-gated. 480 builds are unaffected. Full account in §13.
+
+---
+
 ## 1. Take-aways
 
 | | |
@@ -18,6 +57,8 @@ Every number here traces to a CSV under `runs/bench_pi/`. Where a figure must **
 | **The dataset is the ceiling** | FOD-A is ~38 scenes of one object on blank concrete. It cannot teach the model to abstain, so own-image collection is now the critical path |
 | **It works on hardware** | 12 of 12 real fasteners detected across two live frames, confidence 0.42–0.87, nothing fired on the clutter |
 | **Still wrong** | Screws are labelled `bolt`. Detection is solved; naming is not |
+| **A second model line ships** | `arg-bolts-4` at native **640**: 0.7715 mAP50, **99.3%** of its `best.pt`, at **24.4 ms** — inside the 33 ms frame. See §13 |
+| **A one-number bug cost two sessions** | Two `.hef` scored exactly **0.0000** and were diagnosed as quantization damage. The cause was the baked NMS threshold, and it does not behave like a threshold |
 
 ---
 
@@ -189,7 +230,7 @@ Two limits on that comparison. The v1 losses were measured on the contaminated 9
 
 ## 6. Live camera
 
-`pi/camera_hailo.py`: Camera Module 3 → letterbox → Hailo → boxes. **30 FPS end to end, and the camera is the limit, not the chip** — inference is ~10 ms of a 33 ms frame, so roughly 3× headroom remains before compute constrains anything.
+`fodcv-hailo-camera`: Camera Module 3 → letterbox → Hailo → boxes. **30 FPS end to end, and the camera is the limit, not the chip** — inference is ~10 ms of a 33 ms frame, so roughly 3× headroom remains before compute constrains anything.
 
 | Stage | Median ms |
 |---|---:|
@@ -292,7 +333,7 @@ From the literature:
 
 **Synthesis:** at the target 15–30 cm height, a **shallow 10–25° down-tilt**, not the steep angles taller robots use. Test within that band first when resolving O-3.
 
-`--angle-aug` exists in `training.py` for exactly this (degrees/shear/perspective/scale) and **has still never been run.**
+The `--angle-aug` bundle existed in `training.py` for exactly this (degrees/shear/perspective/scale) and **was never run**; it has since been deleted, because only `perspective` of the four is a viewpoint knob at this mount. `scripts/train_plan.sh` phase C sweeps that one alone, and **has still never been run either.**
 
 ---
 
@@ -306,6 +347,8 @@ Six harness bugs were found and fixed; each had already changed a number.
 - **No thermal-drift control.** Cells run serially on a warming board, so position in the loop could outweigh runtime. The first cell is now re-run at the end and the delta reported; >10% warns that the ranking is confounded.
 - **Board conditions were per-run, not per-cell**, and thread count was claimed but never logged. Every row now carries threads, start/end temperature, throttle state and power.
 - **The eval split shipped with a run was the training dataset's own val split** — 74% contaminated for `fod-a-3k`. Replaced with the scene-clean 263, so no future benchmark can silently reproduce the inflated number.
+- **The scene-clean holdout was inside the training pool of every dataset the sweep uses.** `fod-a-full`, `fod-a-7` and `fod-a-1` all take `subset_size=None` — all 9,623 mapped-box images — and the 263-image holdout was carved out of exactly that pool, so **263 of 263 landed in train**. Phase A run 1 scored **0.9157** class-agnostic mAP50-95 against images it had trained on, against `poc-v2-480`'s legitimate **0.8626**; the +0.053 was the leak, not the extra data. Nothing in the training output says so — the run's own val mAP looks unremarkable. The holdout is now withheld from every dataset unconditionally (263 of 9,623, 2.7%, and the 250 scenes involved hold those 263 images and nothing else, so no near-duplicate sibling stays behind). `fod-a` and `fod-a-3k` as materialised were clean, so `poc-v1` and `poc-v2` stand.
+- **The split was reproducible on one machine only.** `_prepare_voc` iterated `ann_dir.glob("*.xml")` unsorted and then shuffled it, so filesystem order fed the shuffle and the Mac and the CUDA box drew different train/val splits from the same seed — which is the one thing `seed` is documented to prevent. Now sorted. Consequence: re-preparing `fod-a` or `fod-a-3k` no longer reproduces the splits under `data/`, which remain the record for `poc-v1` and `poc-v2`.
 
 **Power is an estimate, not a meter.** `vcgencmd pmic_read_adc` summed as V×A with the community calibration `real_w ≈ pmic_sum × 1.15 + 0.6`. The PMIC does not feed USB, HATs or NVMe — so it does not see the Hailo. NFR-1 still wants a USB meter.
 
@@ -327,6 +370,9 @@ Each one line, each carrying the number that justifies it. This is where the sup
 | **Suppress `unknown` by default** | 53% of training data, a grab-bag of four shapes, and the class that fires on furniture |
 | **Score against a scene-disjoint split** | A per-image shuffle put near-duplicates on both sides — 74% for `fod-a-3k` |
 | **Collect arena data now** | The public dataset cannot supply a single cluttered negative, which is what the false positives need |
+| **Compile Hailo at `conf=0.0001`** | 0.001 produced 0.0000 mAP50 twice. Same weights at 0.0001 score 0.7715. Filter host-side instead; a deploy `.hef` does **not** want it raised |
+| **`--a16-cls` is not the fix it was credited as** | `bfcccc7` credited it for recovering the 7-class head. The control was never run: `plan-b4-7class-480` is a8 and works. Keep the flag, drop the claim |
+| **Gate every `.hef` on the board before shipping** | `export.py` test-infers every format *except* hailo, and the Pi's mAP step OOMed at 640 — so a dead `.hef` shipped clean, twice |
 
 ---
 
@@ -337,6 +383,8 @@ Each one line, each carrying the number that justifies it. This is where the sup
 - **Any FOD-A mAP as an absolute accuracy claim.** These are relative figures for ranking runtimes, which is what they were always used for and where redundancy cancels out. They do not predict arena performance.
 - **Mac latency.** Different CPU, different thread count; it does not transfer and must not be used for AC-3.
 - **Any sweep taken with a desktop session live.** It cost NCNN FP16 ~16% and nothing in `conditions.txt` catches it.
+- **The `s` a8-vs-a16 comparison (0.0313 → 0.6549).** Both builds sit at a 0.001 floor, inside the band that independently zeroes `n`. Until `s` a8 is rebuilt at 0.0001, that pair cannot separate the flag from the floor.
+- **Live per-frame detection counts** from `fodcv-hailo-camera`. They sum `CONFIRM`, `CAUTION` and `IGNORE` tracks, so they count what `policy.py` already discards. Ranking builds by them is meaningless.
 
 ---
 
@@ -346,5 +394,102 @@ Each one line, each carrying the number that justifies it. This is where the sup
 - **A real cluttered-floor test.** The live result put fasteners on a plain sheet with clutter behind them. Debris lying *on* a textured arena floor is the case that matters and is still untested.
 - **The arena dataset** (PRD §10). Now the critical path, not an eventual refinement.
 - **Scene-grouped splitting** before that data is trained on. A per-image shuffle cannot produce a trustworthy score on video-derived data, and arena footage will be video-derived too.
-- **`--angle-aug`**, still never run.
+- **Viewpoint augmentation** — `train_plan.sh` phase C, still never run.
 - **A USB power meter**, to replace the PMIC estimate.
+- **The deployed model changed taxonomy on 2026-09-06** and nothing downstream
+  has been re-validated against it. `docs/INTEGRATION.md` and the slide deck
+  still describe FOD-A's `nail`/`screw`/`bolt`/`unknown`. `unknown` was the
+  `REPORT` class and `arg-bolts-4` has no equivalent, so the robot now has no
+  "possible debris, do not pick" category at all.
+- **Why the baked NMS floor changes produced scores.** Measured and reproducible; the mechanism is undocumented by both Hailo and Ultralytics. See §13.
+- **`s` a8 rebuilt at `conf=0.0001`** — the one experiment that separates `--a16-cls` from the floor. ~35 min, ~$0.45.
+- **`arg-bolts-4` retrained at 480.** The 480 build scores 0.7159 on weights that only ever saw 640; part of the missing 8% should come back.
+- **A live check at training scale.** All eight camera runs on 2026-09-06 were framed off-scale for a 40 mm fastener.
+
+---
+
+## 13. `arg-bolts-4` at 640 — a second model line, and the NMS floor
+
+Everything above is `poc-v1`/`poc-v2` on FOD-A at 480. This section is a separate
+line: **`arg-bolts-4`**, 4 fastener classes (`bolt`, `nut`, `screw`, `washer`),
+trained at **640** on 12,678 images. Two backbones, `n` (yolo11n) and `s`
+(yolo11s). Measured 2026-09-05/06 on the same Pi 5 and Hailo-8.
+
+**Accuracy is scored on a 200-image subset of each run's own eval split**, each
+model against its own `best.pt` on identical images — not against the FOD-A
+figures above, which are a different dataset and not comparable.
+
+| build | mAP50 | vs `best.pt` | median | FPS | fits 33 ms? |
+|---|---:|---:|---:|---:|---|
+| **`n` 640, `conf 0.0001`** | **0.7715** | **99.3%** | **24.4 ms** | 40.9 | **yes** |
+| `n` 480 | 0.7159 | 92% | 16.6 ms | 60.3 | yes |
+| `s` 640 a16 | 0.6549 | 76% | 50.2 ms | 19.9 | no |
+| `n` `ncnn fp16` (CPU) | 0.777 | 100% | 69.1 ms | 14.5 | no |
+| `n` `litert int8` (CPU) | 0.4170 | 54% | 37.8 ms | 26.5 | no |
+
+References on those images: `n` `best.pt` **0.7769**, `s` `best.pt` **0.8638**.
+Per class, the shipping build: bolt 0.960, nut 0.867, screw 0.626, washer 0.634.
+
+`ncnn fp16` retaining 100% is the useful control — it needs no calibration, so it
+proves the weights are fine and any INT8 loss is quantization or the toolchain.
+
+### The finding: the baked NMS threshold is not a threshold
+
+Hailo bakes `nms_scores_th` into the `.hef` and runs NMS on chip, so it cannot be
+lowered at inference. This project compiled at **0.001** to mirror `model.val()`.
+That produced two `.hef` scoring exactly **0.0000** mAP50, diagnosed across two
+sessions as quantization damage. It was not.
+
+Same weights, same calibration, same pod session, `nms_config.json` differing in
+that one field:
+
+| floor | mAP50 | proposals over 5 images | max score |
+|---:|---:|---:|---:|
+| 0.001 | 0.0000 | 5 | 0.0194 |
+| **0.0001** | **0.7715** | **179** | **0.9166** |
+
+**A cutoff at 0.001 cannot discard a 0.9166 proposal.** So the value changes what
+the compiled model *produces*, not what the chip drops at inference. That is the
+opposite of how Hailo's own documentation and Ultralytics' Hailo export page both
+describe it — neither mentions any effect beyond inference-time filtering, and
+Ultralytics' documented default is **0.25**, four orders of magnitude above what
+this project was using. The mechanism is unknown; the two DFC compile logs are
+identical in their NMS handling.
+
+Confirmed **monotonic** for this model, not a band — 0.15 is dead too, verified
+live. And **640-specific**: the same 0.001 floor scores 0.7159 at 480.
+
+### What this falsified
+
+Three hypotheses were tested and are wrong. They are recorded so a fourth session
+does not re-derive them.
+
+| hypothesis | how it died |
+|---|---|
+| `--a16-cls` fixes the dead head | Fresh a8 and a16 at 640/0.001, same session, same host: **both 0.0000** |
+| The INT8 calibration set is class-skewed, and balancing helps | Balancing measured **17% worse** (0.4170 → 0.3446); `screw`, the class it should have rescued, fell to 0.095 on 2.4× the representation |
+| `bfcccc7`: the 7-class head lost its scores to 8-bit | Its "fix" was rebuilt at 480, so a16 and resolution moved together. The missing control — `plan-b4-7class-480`, a8 at 480 — **works** |
+
+The `--a16-cls` machinery is kept: the seam and its tests are useful, and one
+piece of evidence still stands (`s` a8 0.0313 vs a16 0.6549). But that pair sits
+at a 0.001 floor, inside the poisoned band, so it proves nothing until `s` a8 is
+rebuilt at 0.0001. See §11.
+
+### Live camera, 2026-09-06
+
+Eight runs on real fasteners across six `.hef`. Confirms the bench:
+`plan-b4-7class-dead640` returns **0 detections over 256 frames**, all seven
+classes at 0.00, with `postprocess` collapsing to 0.03 ms against ~0.7 ms on a
+working build — nothing reaches the host at all. `plan-b4-7class-640`, the same
+model at a 0.1 floor, returns scores to 0.73.
+
+Every run reproduced §6's result independently: end-to-end sat at 33.3–34.1 ms
+regardless of model. Inference varied 10.2–15.4 ms and `capture` absorbed the
+difference exactly, which is the loop blocking on a 30 FPS sensor.
+
+**Caveat on all eight:** none was framed at training scale for a 40 mm fastener —
+the tool's own geometry report asked for `--zoom 0.54`–`0.71` each time. Flicker
+and detection counts from those runs describe the framing as much as the build.
+
+Full record: [`docs/session-2026-09-06-live-camera.md`](docs/session-2026-09-06-live-camera.md)
+and [`docs/session-2026-09-05-n-640.md`](docs/session-2026-09-05-n-640.md).

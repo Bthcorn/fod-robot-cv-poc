@@ -7,14 +7,16 @@ De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot P
 ## Layout
 
 ```
-src/fodcv/          the package. runtime/ ships to the Pi, research/ is Mac-only,
+src/fodcv/          the package. runtime/ is what the robot imports, research/ is
+                    Mac-only,
                     bench/ measures, the top level is shared.
 src/fodcv/cli/      one module per command: argparse, then the call into the
                     package module that does the work. The two camera helpers
                     are self-contained -- Mac-only stand-ins, not pipeline
                     steps. Wired to console scripts in pyproject.toml -- see
                     Commands below.
-pi/                 runs on the Pi with the *system* interpreter, not the venv.
+                    camera_hailo and robot_stub run on the Pi with the
+                    *system* interpreter, not the venv.
 tests/
 data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
@@ -22,16 +24,18 @@ artifacts/<run-id>/ the deploy unit: weights, exports, manifest, eval split.
                     One rsync moves everything the Pi needs.
 ```
 
-Two ids, same shape. A **run-id** names one trained model, a **dataset-id** names one prepared dataset. Both default to a constant in `src/fodcv/paths.py` (`CURRENT_RUN`, `CURRENT_DATASET`) and both are overridable per command with `--run` / `--dataset`, so nothing grows a required argument.
+Two ids, same shape. A **run-id** names one trained model, a **dataset-id** names one prepared dataset. Both default to a constant in `src/fodcv/paths.py` — today `CURRENT_RUN = arg-bolts-4-n-640` and `CURRENT_DATASET = arg-bolts-4`, the shipping model and the data it was trained on — and both are overridable per command with `--run` / `--dataset`, so nothing grows a required argument. **They move as a pair**, because `--dataset` is what INT8 calibrates from and what the benchmark scores against; `artifacts/<run-id>/run.json` records which goes with which.
 
 ## Setup
 
 ```
-uv sync --extra export --extra bench   # Mac: converters + runtimes
-uv sync --extra bench                  # Pi: runtimes only
+uv sync --extra research --extra export --extra bench   # Mac: everything
+uv sync --extra research --extra bench                  # Pi: benchmark runtimes
 ```
 
-The Mac-only converters (`coremltools`, `litert-torch`, `nncf`, `pnnx`) are in the `export` extra because they do not install on aarch64 at all.
+The Mac-only converters (`nncf`, `pnnx`, `onnxslim`) are in the `export` extra because they do not install on aarch64 at all.
+
+`ultralytics` is in the **`research`** extra, not the base dependencies, so that base is `numpy` + `opencv-python` — see [The robot's interface](#the-robots-interface). Every command above the benchmark needs it, so add `--extra research` to anything that is not the robot.
 
 ```
 uv run pytest
@@ -56,9 +60,8 @@ uv run fodcv-export --run poc-v2-480 --imgsz 480   # runtime artifacts (Mac only
 Each of these cost a debugging session. None is a code bug.
 
 - **`uv` has no `pip`.** Ultralytics auto-installs a missing export dependency by shelling out to `pip`, which does not exist in a `uv`-managed venv — so it fails silently and the export reports a runtime error instead. Install every converter up front: `uv add pnnx nncf ncnn openvino mnn`. This trap recurs for every new export format.
-- **LiteRT cannot share this lockfile.** Ultralytics needs `litert-torch>=0.9.0`, which pins `typing-extensions<4.13` through `xdsl`, while `onnx>=1.22` requires `>=4.15`. Genuinely unsatisfiable, not a pin to loosen. `research/export.py:export_litert` runs only that cell in a throwaway `uv run --isolated --no-project` subprocess — the same thing Ultralytics itself does. Inference is unaffected.
-- **`litert-torch` downgrades torch** (2.13 → 2.9.1) as a side effect of its pin, and `nncf` downgrades numpy. MPS still works at 2.9.1.
-- **CoreML export fails** on this coremltools/torch/M4 combination — an attention block cannot be traced. Reproducible, not a misconfiguration. Mac-only format, irrelevant to a Pi target.
+- **LiteRT cannot share this lockfile**, and so is not in the `export` extra at all. Ultralytics needs `litert-torch>=0.9.0`, which pins `typing-extensions<4.13` through `xdsl`, while `onnx>=1.22` requires `>=4.15`. Genuinely unsatisfiable, not a pin to loosen. `research/export.py:export_litert` runs only that cell in a throwaway `uv run --isolated --no-project` subprocess — the same thing Ultralytics itself does. Inference is unaffected.
+- **`nncf` downgrades numpy.** Harmless here; MPS still works.
 - **macOS camera permission**: `cv2.VideoCapture` needs Privacy & Security → Camera granted to the hosting terminal app, or capture silently fails to open.
 
 ### Adding a dataset
@@ -80,14 +83,6 @@ Preparing writes only to `data/<dataset-id>/` and refuses to overwrite an existi
 
 **Before registering the arena dataset, read PRD §10 step 4 and the note above `arena-v1`.** `split()` is a plain per-image shuffle, which is wrong for anything video-derived — see RESULT.md on scene grouping, where FOD-A demonstrates the failure at 74%.
 
-Standalone (Mac camera, not part of the pipeline):
-
-```
-uv run fodcv-list-cameras  # list available camera indices
-uv run fodcv-camera [i]    # live webcam + inference, ctrl-C or 'q' to stop
-uv run fodcv-policy [src]  # hysteresis + temporal confidence smoothing demo
-```
-
 ## Commands
 
 Every command is a console script installed by `uv sync`. Names map one-to-one onto `src/fodcv/cli/`, declared in `pyproject.toml` under `[project.scripts]`.
@@ -96,15 +91,104 @@ Every command is a console script installed by `uv sync`. Names map one-to-one o
 |---|---|---|
 | `fodcv-prepare` | `cli/prepare_dataset.py` | Builds `data/<dataset-id>/` from its registry entry: download + VOC→YOLO conversion, or validate an already-YOLO export. `--list` shows what is registered. |
 | `fodcv-smoke` | `cli/smoke_test.py` | Runs stock `yolo11n.pt` on sample images to confirm the install works end to end. |
-| `fodcv-train` | `cli/train.py` | Fine-tunes `yolo11n.pt` on `--dataset` (MPS, 15 epochs) → `runs/train_<dataset>[_aug]/`. `--angle-aug` adds viewpoint-robustness augmentation and writes to a separate run dir. |
+| `fodcv-train` | `cli/train.py` | Fine-tunes `--model` (default `yolo11n.pt`) on `--dataset` → `runs/train_<dataset>/`, or `--name` when sweeping. CUDA/MPS/CPU auto-detected. `--set key=value` passes any Ultralytics train argument through (`--set epochs=60 --set imgsz=480 --set seed=1`), which is the only way viewpoint knobs are set — see `scripts/train_plan.sh` phase C. |
 | `fodcv-migrate` | `cli/migrate_artifacts.py` | Publishes a training run: lifts `best.pt` + existing exports out of `runs/` into `artifacts/<run-id>/`, rewrites `exports.json` to relative paths, copies the val split into `eval/`, writes `run.json`. |
 | `fodcv-export` | `cli/export.py` | Builds every Pi runtime artifact (ONNX/OpenVINO/NCNN/LiteRT/MNN × fp32/fp16/int8), reloads each, and writes `exports.json`. **Runs on the Mac, not the Pi.** `--conf` sets the score threshold compiled into a Hailo `.hef`; ignored by every other format, which take `conf=` at call time. |
 | `fodcv-bench` | `cli/bench_pi.py` | Runtime/precision benchmark, run **on the Pi 5**. Median + p95 latency, FPS, size and mAP per `{model} × {format} × {precision}`, plus the board conditions published benchmarks omit. `--soak N` runs sustained load instead of the matrix; `--no-val` skips mAP. |
-| `fodcv-camera` | `cli/camera_test.py` | Live webcam smoke test, Mac-only stand-in for the Pi's real camera. |
-| `fodcv-list-cameras` | `cli/list_cameras.py` | Lists OpenCV camera indices. |
-| `fodcv-policy` | `cli/confidence_policy.py` | Confidence hysteresis + multi-frame EMA smoothing demo. |
+| `fodcv-hailo-camera` | `cli/camera_hailo.py` | Live Camera Module 3 → Hailo detection with a preview HUD, geometry readout and timing table. Run **on the Pi**, system interpreter. |
+| `fodcv-robot-stub` | `cli/robot_stub.py` | The robot's FR-4 loop with prints instead of motors. Run **on the Pi** to prove the seam. |
 
-`pi/camera_hailo.py` is not a console script — it runs on the Pi with the **system** interpreter (see below).
+### Sweeping
+
+`scripts/train_plan.sh` is the training plan and its runner in one file: the
+question each run answers sits next to the command that produces it. Ordered by
+payoff, resumable (a run with a `best.pt` is skipped), phase-selectable.
+
+```
+bash scripts/train_plan.sh            # every phase, in order
+bash scripts/train_plan.sh A B        # just those
+EPOCHS=30 bash scripts/train_plan.sh  # cheaper pass
+```
+
+It produces candidates, it does not rank them. Every mAP it prints is against
+the training dataset's own val split, which for FOD-A is near-duplicate
+contaminated -- see RESULT.md §7, and score on the scene-clean holdout instead.
+
+`fodcv-hailo-camera` and `fodcv-robot-stub` are console scripts like the rest, but run on the Pi with the **system** interpreter (see below).
+
+## The robot's interface
+
+The robot lives in its own repo, installs this one and imports one class:
+
+```python
+from fodcv.runtime.vision import Vision
+
+with Vision(hef=".../best.hef", lookahead=(0.5, 1.0)) as vision:
+    while sweeping:
+        if vision.age > 0.5:
+            halt("vision stalled")
+        set_speed(V_SLOW if vision.zone_blocked() else V_FAST)
+        drive_step()
+```
+
+**[`docs/INTEGRATION.md`](docs/INTEGRATION.md) is the handoff document** — install, the
+release bundle, the stable-vs-diagnostic field contract, failure modes, hysteresis
+retuning for M-12, and where the latency budget in RESULT.md §6 stops being ours. Read
+that, not this section.
+
+Three things worth knowing from here:
+
+`zone_blocked()` is the whole product. Collection is passive — PRD FR-11 has no gripper
+and no targeting, so nothing steers toward an object and FR-15 makes the homography
+optional. The robot needs one boolean per frame: is a confirmed detection in the strip of
+floor it is about to drive over. `latest()` returns `Target(id, state, action, cls, conf,
+box, centroid)` for logging and the telemetry heatmap, not for the main path.
+
+**`state` and `action` are two fields on purpose.** `state` is `IGNORE`/`CAUTION`/`CONFIRM`
+— confidence smoothed over frames by the hysteresis in `runtime/policy.py`. `action` is
+`PICK`/`REPORT`/`IGNORE`, from `policy.ACTIONS`, keyed by class. A CAUTION screw and a
+CAUTION shard both mean "slow down"; only the class says which one the magnet can lift.
+`cls` itself is diagnostic only — FR-3 collapses the taxonomy to one class and the names go
+away, so nothing downstream may branch on it.
+
+**Capture runs on its own daemon thread.** The robot's loop is never blocked by a 20 ms
+frame grab, and a multi-second routine does not leave a backlog of stale frames behind it.
+`age` is how old the current targets are; the robot decides what is too old. A thread
+failure is stored and re-raised from the next `latest()` or `zone_blocked()` — a dead
+camera must not read as "no debris, keep patrolling".
+
+Install it into the Pi's **system** interpreter, which is where picamera2 and
+`hailo_platform` live:
+
+```
+sudo python3.11 -m pip install --break-system-packages \
+  'fod-vision @ git+https://github.com/Bthcorn/fod-robot-cv-poc.git@v0.2.0'
+```
+
+That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is
+`>=3.11`. Both are already on the Pi via apt's `python3-picamera2`, so the install adds
+effectively nothing — and no torch. Nothing under `runtime/` imports `ultralytics` or
+`yaml`; `fodcv/cli/camera_hailo.py` imports `Vision` like any other consumer, which is what
+keeps the interface exercised by the tool that produced every number in `RESULT.md`.
+
+### The deploy bundle
+
+The `.hef` is gitignored. Ship three files, ~7.8 MB, as a release asset on the same tag the
+robot pins — not an rsync, so "which model is on the board" has an answer:
+
+```
+tar czf arg-bolts-4-n-640.tar.gz \
+  artifacts/arg-bolts-4-n-640/run.json \
+  artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/
+gh release create v0.3.0 arg-bolts-4-n-640.tar.gz
+```
+
+`run.json` and `nms_config.json` travel with the `.hef` because the class names and the
+input size are read off them at load time, not hardcoded.
+
+**Not `bench_int8_hailo_model/`.** That directory in this run holds the conf 0.001
+build, which scores 0.0000 mAP50 -- RESULT.md §13. The shipping build is the 0.0001
+variant and the bundle must carry that one.
 
 ## Export on the Mac, benchmark on the Pi
 
@@ -123,28 +207,24 @@ Manifest paths are stored **relative to `exports.json`**, and the shipped `eval/
 
 ### Compiling the Hailo `.hef`
 
-Buildable neither on the Pi nor natively on the Mac: it needs an x86-64 Linux Dataflow Compiler under emulation. `bash -s` reads the script on stdin and cannot also take positional arguments, so parameters go through the environment.
+Buildable neither on the Pi nor on the Mac: the Dataflow Compiler is x86-64 Linux only, with no aarch64 or macOS build. So it runs where the training already does — a rented pod, WSL2, or any Linux box. Parameters go through the environment.
 
 ```
-docker --context desktop-linux run --platform linux/amd64 --rm -i \
-  -v "$PWD":/work -w /work -v "$HOME/Downloads":/wheels:ro \
-  -v hailo-pipcache:/root/.cache/pip \
-  -e HEF_RUN=poc-v2-480 -e HEF_DATASET=fod-a-3k -e HEF_IMGSZ=480 -e HEF_CONF=0.10 \
-  python:3.10-slim bash -s < hailo-compile/hailo-compile.sh
+HEF_RUN=arg-bolts-4-n-640 HEF_DATASET=arg-bolts-4 HEF_IMGSZ=640 \
+  bash hailo-compile/hailo-compile.sh
 ```
 
-The Dataflow Compiler wheel is taken from the mounted `Downloads` folder when it's there. Hailo's Developer Zone is login-gated, so nothing can fetch it automatically — set `HEF_WHEEL_URL` to your own mirror and the scripts download it once and cache it (the pip-cache volume under Docker, `~/.cache/hailo-compile/` under WSL2), verified against `HEF_WHEEL_SHA256`, which defaults to the sha256 of the 3.34.0 wheel these results were built with. A mismatch aborts before install. No mirror URL is committed: the DFC is proprietary and this repo is public.
+Every `HEF_*` variable is optional: unset, it falls through to the Python-side default (`paths.CURRENT_RUN`, `matrix.IMGSZ`, `matrix.FMT_EXTRA_ARGS`), so there is one place a default lives. `HEF_GPU=1` runs the quantization-aware fine-tuning step on an NVIDIA card — the slow part — and needs a real CUDA driver, which on Windows means the NVIDIA **WSL**-CUDA driver on the host, nothing inside WSL. Read the `tf.config.list_physical_devices('GPU')` line the script prints: an empty list is a silent CPU fallback, which succeeds but costs 26–86 min on that step.
 
-All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-negotiable details are documented at the top of `hailo-compile/hailo-compile.sh`: **Docker Desktop, not OrbStack** (OrbStack's Rosetta exposes no AVX and TensorFlow aborts on import), `-i` or the script reads EOF and exits 0 having run nothing, and **≥10 GB of VM RAM** or Layer Noise Analysis is SIGKILLed ~18 min in with no message.
+From Windows, `hailo-compile/hailo-compile.ps1` passes the same variables into the default WSL distro and runs the script there. Requires WSL2 with Ubuntu 22.04.
 
-Windows options, same `HEF_*` variables both ways:
+The Dataflow Compiler wheel is not on PyPI and Hailo's Developer Zone is login-gated, so nothing can fetch it automatically. Point `HEF_WHEEL` at a downloaded wheel, or drop it in `~/.cache/hailo-compile/` or `~/Downloads/` and the script finds it. Set `HEF_WHEEL_URL` to your own mirror instead and it downloads once, cached in `~/.cache/hailo-compile/`, verified against `HEF_WHEEL_SHA256` — which defaults to the sha256 of the 3.34.0 wheel these results were built with. A mismatch aborts before install. No mirror URL is committed: the DFC is proprietary and this repo is public.
 
-- **Docker** (`hailo-compile/hailo-compile.ps1`) -- identical container payload, PowerShell syntax. No Rosetta/AVX concern, amd64 runs natively.
-- **WSL2, no Docker** (`hailo-compile/hailo-compile-wsl.ps1` / `.sh`) -- installs the DFC wheel into a persistent WSL2 venv, one less layer than Docker. `HEF_GPU=1` runs the fine-tuning step on an NVIDIA GPU via WSL2's CUDA passthrough (needs the NVIDIA WSL-CUDA driver on the Windows host, nothing inside WSL). Script confirms with `tf.config.list_physical_devices('GPU')`. Unverified: whether DFC 3.34.0's TF pin has matching `tensorflow[and-cuda]` wheels -- wheel's gated, couldn't check.
+End-to-end runbook for a rented box, dataset through `.hef`: [`docs/autorun-runpod-e2e.md`](docs/autorun-runpod-e2e.md).
 
-Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it inside the emulated container. 510 images ≈ 26 min; 2,550 ≈ 86 min.
+Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it. 510 images ≈ 26 min CPU-only; 2,550 ≈ 86 min. `HEF_GPU=1` is what those numbers are worth paying to avoid.
 
-`--conf` is compiled into the `.hef` and on the Pi acts as a **floor** that inference can only filter above. The matrix default is 0.001 so a benchmark row keeps its low-confidence tail and stays comparable to the host-NMS backends; a deploy build wants something usable instead. Verify the result on the board with `hailortcli parse-hef <best.hef>` — it prints the architecture, the score threshold and the class count.
+`--conf` is compiled into the `.hef` and on the Pi acts as a **floor** that inference can only filter above. The matrix default is 0.0001, low enough to keep a benchmark row's tail and comparable to the host-NMS backends. It is not the filter its name implies — at 640 a 0.001 floor scores 0.0000 mAP50 on the same weights (RESULT.md §13) — so do not raise it for a deploy build; filter host-side with `--conf` instead. Verify the result on the board with `hailortcli parse-hef <best.hef>` — it prints the architecture, the score threshold and the class count.
 
 ## Run protocol on the Pi
 
@@ -175,11 +255,10 @@ Every row records `threads`, `temp_start_c`, `temp_end_c`, `throttled`, `power_w
 ### Live camera on the Pi
 
 ```
-python3 pi/camera_hailo.py --hef artifacts/poc-v2-480/bench_int8_hailo_model/best.hef \
-  --preview --frames 0 --zoom 1.0
+fodcv-hailo-camera --preview --frames 0 --zoom 1.0
 ```
 
-Run with the **system** interpreter, not the project venv: `python3-picamera2` is an apt package built against Python 3.11 and the venv is 3.12 — a different C ABI, so `import libcamera` fails there no matter what pip does. System 3.11 already carries picamera2, libcamera, `hailo_platform` and cv2. There is no torch or ultralytics in that file; the `.hef` does NMS on-chip, so postprocess is a coordinate transform.
+Run with the **system** interpreter, not the project venv: `python3-picamera2` is an apt package built against Python 3.11 and the venv is 3.12 — a different C ABI, so `import libcamera` fails there no matter what pip does. System 3.11 already carries picamera2, libcamera, `hailo_platform` and cv2. There is no torch or ultralytics in it; the `.hef` does NMS on-chip, so postprocess is a coordinate transform.
 
 `--preview` needs `DISPLAY=:0`, which conflicts with rule 3 above — preview and benchmarking are different sessions. Keys: `q` quit, `+`/`-` sensor zoom, `[`/`]` confidence, `r` rotate, `f` refocus, `u` toggle the `unknown` class. `--focus` takes `auto` (default) or a distance in metres; the startup block prints the measured focus distance and the object size that sits at training scale there.
 

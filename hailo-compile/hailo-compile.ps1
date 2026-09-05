@@ -1,32 +1,26 @@
-# Compile best.pt -> best.hef for the Hailo-8, from Windows (Docker Desktop).
+# Compile best.pt -> best.hef for the Hailo-8, from Windows via WSL2.
 #
-# Same payload as the Mac driver -- hailo-compile/hailo-compile.sh runs unchanged inside
-# the container, it doesn't care what host started it. This script only replaces
-# the macOS/zsh docker-run invocation documented in README.md with a PowerShell
-# equivalent: $PWD/$HOME -> $PWD.Path/$env:USERPROFILE, and `bash -s < file`
-# (PowerShell has no `<` redirection into external processes) -> `Get-Content | ...`.
+# The compiler is x86_64-Linux-only, and WSL2 is real Linux -- a kernel, not
+# emulation -- so this just launches hailo-compile/hailo-compile.sh inside the
+# default WSL distro. The Windows-side NVIDIA driver passes through to it, which
+# is what HEF_GPU=1 needs.
 #
-# On Windows x86_64 there's no Rosetta/AVX concern -- the amd64 container runs
-# natively, no emulation -- but the >=10 GB VM RAM requirement still applies:
-# Docker Desktop -> Settings -> Resources (WSL2 backend: edit %UserProfile%\.wslconfig
-# instead if Resources is greyed out).
+# WSL auto-translates the invoking PowerShell session's cwd, so run this from the
+# repo root -- nothing to mount.
 #
 # Usage:
-#   $env:HEF_RUN = "poc-v2-480"; $env:HEF_DATASET = "fod-a-3k"; $env:HEF_IMGSZ = "480"; $env:HEF_CONF = "0.10"
-#   .\docker\hailo-compile.ps1
+#   $env:HEF_RUN = "arg-bolts-4-n-640"; $env:HEF_GPU = "1"
+#   .\hailo-compile\hailo-compile.ps1
 #
-# Unset variables are left for hailo-compile/hailo-compile.sh's own ${VAR:-default} fallbacks.
+# Requires WSL2 with Ubuntu 22.04 (`wsl --install -d Ubuntu-22.04`) and the DFC
+# wheel reachable from inside it -- see hailo-compile/hailo-compile.sh for where
+# HEF_WHEEL is looked for by default.
 $ErrorActionPreference = "Stop"
 
 $envArgs = @()
-foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF", "HEF_WHEEL_URL", "HEF_WHEEL_SHA256") {
+foreach ($name in "HEF_RUN", "HEF_DATASET", "HEF_IMGSZ", "HEF_CONF", "HEF_FRACTION", "HEF_FORCE", "HEF_A16_CLS", "HEF_GPU", "HEF_WHEEL", "HEF_WHEEL_URL", "HEF_WHEEL_SHA256", "HEF_VENV") {
     $value = [Environment]::GetEnvironmentVariable($name)
-    if ($value) { $envArgs += "-e"; $envArgs += "$name=$value" }
+    if ($value) { $envArgs += "$name=$value" }
 }
 
-Get-Content "$PSScriptRoot\hailo-compile.sh" -Raw | docker --context desktop-linux run --platform linux/amd64 --rm -i `
-    -v "$($PWD.Path):/work" -w /work `
-    -v "$env:USERPROFILE\Downloads:/wheels:ro" `
-    -v hailo-pipcache:/root/.cache/pip `
-    @envArgs `
-    python:3.10-slim bash -s
+wsl.exe -e env @envArgs bash hailo-compile/hailo-compile.sh

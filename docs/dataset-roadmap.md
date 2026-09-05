@@ -14,13 +14,13 @@ exports YOLO — nothing to download, nothing to convert.
 ```python
 "arena-v1": YoloSource(
     source_dir=Path("~/Downloads/arena-export").expanduser(),
-    class_names={0: "metal_fastener"},
+    class_names={0: "fod"},
     val_fraction=0.15,
 ),
 ```
 
 **One class, not four.** PRD FR-3 specifies a single trained class,
-`metal_fastener`; per-class recall is recovered at evaluation time from the
+`fod`; per-class recall is recovered at evaluation time from the
 seeding log. The 4-class scheme (`nail`/`screw`/`bolt`/`unknown`) belongs to the
 FOD-A comparison only.
 

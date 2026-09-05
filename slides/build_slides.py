@@ -3,6 +3,9 @@
 
     uv run --with python-pptx python slides/build_slides.py
 
+The .pptx it writes is gitignored -- it is build output, and every figure in it
+comes from a file that is committed.
+
 python-pptx is fetched into a throwaway environment rather than added to the
 project: nothing else here needs it, and the project already uses that pattern
 for LiteRT export (research/export.py:export_litert).
@@ -35,7 +38,6 @@ MATRIX_CSV = ROOT / "runs" / "bench_pi" / "results_480_poc_v2_matrix.csv"
 INK = RGBColor(0x1A, 0x1D, 0x21)
 MUTED = RGBColor(0x5F, 0x67, 0x63)
 ACCENT = RGBColor(0xC2, 0x70, 0x1C)   # the result / "after" colour
-COOL = RGBColor(0x2E, 0x6F, 0xA8)     # the baseline / "before" colour
 RULE = RGBColor(0xD8, 0xDC, 0xD8)
 BAND = RGBColor(0xF2, 0xF3, 0xF1)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)

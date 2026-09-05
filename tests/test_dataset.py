@@ -2,6 +2,7 @@ import pytest
 
 from fodcv import paths
 from fodcv.research import dataset
+from fodcv.research import datasets
 from fodcv.research.datasets import source
 
 FOD_A = source("fod-a")
@@ -146,3 +147,65 @@ def test_split_with_no_subset_size_keeps_everything():
     items = list(range(100))
     both = dataset.split(items, 0.15, seed=0)
     assert len(both["val"]) + len(both["train"]) == 100
+
+
+# --------------------------------------------------------------------------
+# grouped splitting -- near-duplicates must not span train and val
+# --------------------------------------------------------------------------
+
+
+def write_ann_dir(tmp_path, spec):
+    """A VOC Annotations dir from {stem: category}, one object per file."""
+    ann_dir = tmp_path / "Annotations"
+    ann_dir.mkdir()
+    for stem, name in spec.items():
+        obj = OBJECT.format(name=name, xmin=0, ymin=0, xmax=10, ymax=10)
+        (ann_dir / f"{stem}.xml").write_text(
+            VOC_TEMPLATE.format(w=200, h=100, objects=obj))
+    return ann_dir
+
+
+def test_backgrounds_are_only_images_with_no_mapped_box(tmp_path):
+    ann_dir = write_ann_dir(tmp_path, {
+        "a": "Nail", "b": "Bolt",          # positives, handled by the caller
+        "c": "Pliers", "d": "Wrench",      # negatives
+    })
+    picked = dataset.background_stems(ann_dir, FOD_A.class_map, limit=10, seed=0)
+    assert set(picked) == {"c", "d"}
+
+
+def test_backgrounds_are_round_robin_not_a_flat_draw(tmp_path):
+    """A flat shuffle of FOD-A's negatives is 12% Pliers and 0.5% Tape, so it
+    teaches one negative shape well and 23 badly. Every category must appear."""
+    spec = {f"p{i}": "Pliers" for i in range(50)}
+    spec.update({f"w{i}": "Wrench" for i in range(20)})
+    spec["t0"] = "Tape"
+    picked = dataset.background_stems(write_ann_dir(tmp_path, spec),
+                                      FOD_A.class_map, limit=9, seed=0)
+    assert len(picked) == 9
+    assert {s[0] for s in picked} == {"p", "w", "t"}
+
+
+def test_backgrounds_honour_the_limit_and_exhaust_gracefully(tmp_path):
+    spec = {f"p{i}": "Pliers" for i in range(5)}
+    spec["t0"] = "Tape"
+    ann_dir = write_ann_dir(tmp_path, spec)
+    assert len(dataset.background_stems(ann_dir, FOD_A.class_map, 3, seed=0)) == 3
+    # Asking for more than exists stops rather than looping forever.
+    assert len(dataset.background_stems(ann_dir, FOD_A.class_map, 99, seed=0)) == 6
+
+
+def test_backgrounds_never_include_a_holdout_image(tmp_path):
+    """The holdout is scored against, so it is withheld unconditionally --
+    positives and backgrounds alike."""
+    held = next(iter(datasets.HOLDOUT_STEMS))
+    ann_dir = write_ann_dir(tmp_path, {held: "Pliers", "keep": "Wrench"})
+    picked = dataset.background_stems(ann_dir, FOD_A.class_map, limit=10, seed=0)
+    assert picked == ["keep"]
+
+
+def test_background_max_defaults_to_off():
+    """Every dataset registered before this existed must prepare unchanged."""
+    for name in ("fod-a", "fod-a-3k", "fod-a-full", "fod-a-7", "fod-a-1"):
+        assert datasets.source(name).background_max == 0
+    assert datasets.source("fod-a-1-neg").background_max == 9360

@@ -12,10 +12,11 @@ quantization and shrinks the INT8 mAP drop AC-2 asks us to report.
 
 Which precisions each format supports: fodcv.matrix.
 
-Run:  uv run fodcv-export --run poc-v1
+Run:  uv run fodcv-export --run arg-bolts-4-n-640
 Out:  artifacts/<run-id>/bench_* + exports.json (the manifest bench_pi.py reads)
 """
 
+import contextlib
 import re
 import subprocess
 from pathlib import Path
@@ -46,7 +47,7 @@ from fodcv.paths import (
 )
 
 
-def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
+def export_litert(weights: Path, imgsz: int, quantize, calib: Path, fraction=None) -> str:
     """Build the .tflite in a throwaway env, because it cannot share ours.
 
     ponytail: forced, not stylistic. litert-torch pins typing-extensions<4.13
@@ -54,10 +55,16 @@ def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
     lockfile. Ultralytics solves it the same way (engine/exporter.py's isolated
     export envs), and dropping LiteRT is not an option under AC-3.
     """
+    # `fraction` rides through export()'s **kwargs into the Exporter, same as
+    # every other calibrated format. Unplumbed, LiteRT calibrated on the whole
+    # train split (8,891 images at 640) and the quantizer was SIGKILLed against
+    # a 31 GB container limit -- the failure reads as a converter bug because
+    # the OOM leaves no traceback, only exit 137.
+    frac = f", fraction={fraction!r}" if fraction is not None and quantize == 8 else ""
     script = (
         "from ultralytics import YOLO\n"
         f"p = YOLO({str(weights)!r}).export(format='litert', imgsz={imgsz}, "
-        f"quantize={quantize!r}, data={str(calib) if quantize == 8 else None!r})\n"
+        f"quantize={quantize!r}, data={str(calib) if quantize == 8 else None!r}{frac})\n"
         "print('ARTIFACT=' + str(p))\n"
     )
     cmd = [
@@ -70,7 +77,59 @@ def export_litert(weights: Path, imgsz: int, quantize, calib: Path) -> str:
     for line in reversed(proc.stdout.splitlines()):
         if line.startswith("ARTIFACT="):
             return line.removeprefix("ARTIFACT=").strip()
-    raise RuntimeError(f"isolated litert export failed:\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}")
+    # Exit code first: 137 is the OOM killer, and it is the whole diagnosis.
+    # Buried after 3 KB of converter chatter it gets truncated out of the manifest.
+    raise RuntimeError(
+        f"isolated litert export failed (exit {proc.returncode}"
+        f"{' -- SIGKILL, almost certainly OOM' if proc.returncode == 137 else ''}):"
+        f"\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}"
+    )
+
+
+@contextlib.contextmanager
+def a16_classification_head():
+    """Compile the detect head's class convs at 16-bit instead of 8.
+
+    This is what killed plan-b4-7class. The first .hef compiled clean and decoded
+    nothing; the rebuild goes silent on 25% of holdout frames its own FP32 weights
+    score at recall 1.000, and flickers on the Pi at both 480 and 640. The 1-class
+    and 4-class heads survived a8 on this same toolchain -- seven classes split the
+    same score signal across seven channels, so each lands in fewer of the 256 steps.
+
+    Ultralytics offers no hook: quantize='w8a16' is rejected for hailo (it is not in
+    W8A16_FORMATS) and export_hailo assembles its model script inline. So intercept
+    the script on its way into the DFC -- `ClientRunner.load_model_script` is the
+    only seam -- and append one line.
+
+    Costs latency and size. Only worth it for a head that measurably lost its scores.
+    """
+    from hailo_sdk_client import ClientRunner  # compile host only; absent on the Mac
+
+    original = ClientRunner.load_model_script
+
+    def patched(self, script, *args, **kwargs):
+        return original(self, cls_layers_to_a16(script), *args, **kwargs)
+
+    ClientRunner.load_model_script = patched
+    try:
+        yield
+    finally:
+        ClientRunner.load_model_script = original
+
+
+def cls_layers_to_a16(script: str) -> str:
+    """Append a 16-bit precision line for the class convs named in `script`.
+
+    The cls layers are the ones the script already names in
+    change_output_activation(..., sigmoid) -- reading them back out beats
+    hardcoding conv54/65/80, which are per-model names.
+    """
+    layers = re.findall(r"change_output_activation\((\w+), sigmoid\)", script)
+    # No sigmoid lines means the head shape changed under us and we would be
+    # compiling an unmodified a8 script while reporting an a16 build.
+    assert layers, f"no sigmoid class layers found in model script:\n{script}"
+    print(f"  a16 class head: {', '.join(layers)}")
+    return f"{script}\nquantization_param([{', '.join(layers)}], precision_mode=a16_w16)"
 
 
 def check_quantized(manifest: dict, manifest_path: Path, formats: list[str]):
@@ -96,6 +155,22 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
     paths.calib_yaml_path. Mac-only by construction: the train split is not
     shipped to the Pi and the Pi never quantizes.
 
+    **The head slice is deliberate. Do not "fix" it by shuffling.** Ultralytics
+    calibrates on `im_files[: round(len * fraction)]` of a sorted list
+    (`data/base.py:177,183`), so at `fraction=0.3` arg-bolts calibrates on a
+    bolt-heavy 70.0/20.6/3.5/5.9 class split against a whole-split
+    60.9/20.7/8.6/9.8. That looks like a bug and was measured as the opposite.
+    Same host, same versions, `arg-bolts-4-n-640` litert int8 over 200 images:
+
+        sorted head slice   mAP50 0.4170   bolt 0.735  screw 0.128
+        seeded shuffle      mAP50 0.3446   bolt 0.511  screw 0.095
+
+    Balancing it cost 17%, and `screw` got *worse* with 2.4x the representation.
+    INT8 has 256 levels either way: a homogeneous slice keeps activation ranges
+    narrow and the steps fine, while a shuffled one spans every lighting
+    condition and scale in the set, widening the ranges every layer must cover.
+    Representativeness is the usual advice and it loses here.
+
     ponytail: generated, not committed -- data/ is gitignored, and a checked-in
     copy would drift from data.yaml the moment the dataset is rebuilt.
     """
@@ -110,7 +185,8 @@ def calib_yaml(dataset: str = CURRENT_DATASET) -> Path:
 
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
-        precisions=None, imgsz=IMGSZ, force=False, conf=None):
+        precisions=None, imgsz=IMGSZ, force=False, conf=None, calib_fraction=None,
+        a16_cls=False):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -142,7 +218,8 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                 print(f"\n=== exporting {key} ===")
                 try:
                     if fmt == "litert":
-                        path = export_litert(weights, imgsz, quantize, calib)
+                        path = export_litert(weights, imgsz, quantize, calib,
+                                             calib_fraction if takes_calibration(fmt, quantize) else None)
                     else:
                         # `conf` overrides only where the format already declares
                         # one -- hailo. Every other backend takes conf= at call
@@ -150,13 +227,22 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, formats=None,
                         extra = dict(FMT_EXTRA_ARGS.get(fmt, {}))
                         if conf is not None and "conf" in extra:
                             extra["conf"] = conf
-                        path = YOLO(str(weights)).export(
-                            format=fmt,
-                            imgsz=imgsz,
-                            quantize=quantize,
-                            data=str(calib) if takes_calibration(fmt, quantize) else None,
-                            **extra,
-                        )
+                        # `fraction` is a cfg key, not an export argument, so it
+                        # rides through model.export's **kwargs into the Exporter
+                        # and is read by get_int8_calibration_dataloader. Only
+                        # sent when set, so an unqualified export is unchanged.
+                        if calib_fraction is not None and takes_calibration(fmt, quantize):
+                            extra["fraction"] = calib_fraction
+                        with contextlib.ExitStack() as stack:
+                            if fmt == "hailo" and a16_cls:
+                                stack.enter_context(a16_classification_head())
+                            path = YOLO(str(weights)).export(
+                                format=fmt,
+                                imgsz=imgsz,
+                                quantize=quantize,
+                                data=str(calib) if takes_calibration(fmt, quantize) else None,
+                                **extra,
+                            )
                     path = claim_artifact(path, fmt, label)
                     # Reload + one inference: an export that cannot load back is
                     # not an export. Except hailo -- HailoBackend opens the PCIe

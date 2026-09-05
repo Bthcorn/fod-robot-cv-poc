@@ -12,7 +12,7 @@ row should read `reused`. An `exported` means the rsync missed and this cell is
 measuring a different file.
 
 Deploy, then run on the Pi 5:
-    rsync -a mac:cv-poc/artifacts/poc-v1/ artifacts/poc-v1/
+    rsync -a mac:cv-poc/artifacts/arg-bolts-4-n-640/ artifacts/arg-bolts-4-n-640/
     uv run fodcv-bench --threads 4                  # stage A, full matrix
     uv run fodcv-bench --models yolo26n.pt --precisions fp32   # stage B
     taskset -c 0-1 uv run fodcv-bench --formats ncnn --threads 2 --no-val
@@ -26,6 +26,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -360,6 +361,47 @@ def eval_split(run: str, dataset: str):
     return fallback, dataset_val_images(dataset)
 
 
+def capped_val(data_yaml: Path, val_images: Path, limit: int) -> Path:
+    """A symlinked subset of the val split, so the mAP gate fits in 4 GB.
+
+    2,535 images at 640 OOMs the board -- which is how two dead .hef files
+    shipped: the only check that would have caught them could not be run.
+    Deterministic head slice, not a sample; two runs of the same cap must score
+    the same images or the gate has no baseline.
+    """
+    images = sorted(val_images.glob("*.jpg"))[:limit]
+    labels_src = Path(str(val_images).replace("/images/", "/labels/"))
+    out = OUT_DIR / f"val_subset_{limit}"
+    shutil.rmtree(out, ignore_errors=True)
+    (out / "images" / "val").mkdir(parents=True)
+    (out / "labels" / "val").mkdir(parents=True)
+    for img in images:
+        (out / "images" / "val" / img.name).symlink_to(img.resolve())
+        label = labels_src / f"{img.stem}.txt"
+        # A dangling symlink is a read error; a missing label is a background
+        # image, which ultralytics already handles by absence.
+        if label.exists():
+            (out / "labels" / "val" / label.name).symlink_to(label.resolve())
+    (out / "data.yaml").write_text(yaml.safe_dump(
+        {"train": "images/val", "val": "images/val",
+         "names": class_names_in(data_yaml)}, sort_keys=False))
+    print(f"val capped to {len(images)} images -> {out}/data.yaml")
+    return out / "data.yaml"
+
+
+def out_paths():
+    """Free (results, conditions) pair. results.csv is opened "w", so a second
+    sweep used to silently overwrite the first -- and the two files must share a
+    suffix or a result loses the conditions it was measured under."""
+    n = 1
+    while True:
+        suffix = "" if n == 1 else f"_{n}"
+        results = OUT_DIR / f"results{suffix}.csv"
+        if not results.exists():
+            return results, OUT_DIR / f"conditions{suffix}.txt"
+        n += 1
+
+
 def check_class_agreement(run: str, data_yaml: Path):
     """A model scored against a differently-classed dataset reports nonsense.
 
@@ -378,7 +420,7 @@ def check_class_agreement(run: str, data_yaml: Path):
 
 def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, formats=None,
         precisions=None, threads=None, run_val=True, soak_seconds=0, imgsz=IMGSZ,
-        cooldown=0, temp_target=62.0):
+        cooldown=0, temp_target=62.0, val_max=500):
     formats = formats or FORMATS
     precisions = precisions or DEFAULT_PRECISIONS
 
@@ -390,6 +432,10 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
         check_class_agreement(run_id, data_yaml)
     image_paths = sorted(val_images.glob("*.jpg"))
     assert image_paths, f"no val images in {val_images}"
+    val_count = len(image_paths)
+    if run_val and val_max and val_count > val_max:
+        data_yaml = capped_val(data_yaml, val_images, val_max)
+        val_count = val_max
     frames = load_images(image_paths, WARMUP + RUNS)
 
     models = models or [weights or str(run_weights(run_id))]
@@ -405,6 +451,7 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
     conditions["imgsz"] = imgsz
     conditions["cooldown_s"] = cooldown
     conditions["temp_target_c"] = temp_target if cooldown else "n/a"
+    conditions["val_images_scored"] = val_count if run_val else "n/a (--no-val)"
     print("board conditions:")
     for k, v in conditions.items():
         print(f"  {k}: {v}")
@@ -463,22 +510,23 @@ def run(run_id=CURRENT_RUN, dataset=CURRENT_DATASET, weights=None, models=None, 
                 print("  WARNING: >10% drift -- the board was still heating, ranking is confounded")
 
     conditions["cpu_temp_c_end"] = board_conditions()["cpu_temp_c"]
-    (OUT_DIR / "conditions.txt").write_text(
+    results_csv, conditions_txt = out_paths()
+    conditions_txt.write_text(
         "\n".join(f"{k}: {v}" for k, v in conditions.items())
-        + f"\nval_images: {len(image_paths)}\nruns: {RUNS} (warmup {WARMUP})\n"
+        + f"\nval_images_available: {len(image_paths)}\nruns: {RUNS} (warmup {WARMUP})\n"
     )
 
     fields = ["model", "dataset", "format", "precision", "threads", "artifact", "median_ms", "p95_ms", "fps",
               "preprocess_ms", "inference_ms", "postprocess_ms", "size_mb", "map50", "map50_95",
               "temp_start_c", "temp_end_c", "throttled", "power_w", "status"]
-    with (OUT_DIR / "results.csv").open("w", newline="") as f:
+    with results_csv.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore", restval="n/a")
         writer.writeheader()
         writer.writerows(
             {k: round(v, 3) if isinstance(v, float) else v for k, v in row.items()} for row in rows
         )
 
-    print(f"\nwrote {OUT_DIR}/results.csv and conditions.txt")
+    print(f"\nwrote {results_csv} and {conditions_txt.name}")
     ok = [r for r in rows if r["status"] == "ok"]
     if ok:
         best = min(ok, key=lambda r: r["median_ms"])

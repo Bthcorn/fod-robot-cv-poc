@@ -24,6 +24,9 @@ def main():
     parser.add_argument("--temp-target", type=float, default=62.0,
                         help="cool to this C before each cell (default: 62)")
     parser.add_argument("--no-val", action="store_true", help="skip mAP -- latency-only sweeps")
+    parser.add_argument("--val-max", type=int, default=500,
+                        help="cap the mAP set to N images (default: 500; 0 = whole split). "
+                             "The full 640 split OOMs a 4 GB Pi, which disables the gate entirely")
     parser.add_argument("--soak", type=int, default=0, help="seconds of sustained load instead of the matrix")
     args = parser.parse_args()
 
@@ -40,6 +43,7 @@ def main():
         imgsz=args.imgsz,
         cooldown=args.cooldown,
         temp_target=args.temp_target,
+        val_max=args.val_max,
     )
 
 
