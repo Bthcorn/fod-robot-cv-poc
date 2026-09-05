@@ -1,0 +1,3 @@
+model,dataset,format,precision,threads,artifact,median_ms,p95_ms,fps,preprocess_ms,inference_ms,postprocess_ms,size_mb,map50,map50_95,temp_start_c,temp_end_c,throttled,power_w,status
+best.pt,arg-bolts-4,hailo,fp32,4,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,63.4,n/a,n/a,3.84,SKIPPED: Ultralytics has no fp32 export path for hailo
+best.pt,arg-bolts-4,hailo,int8,4,reused,50.484,51.751,19.808,2.932,46.821,0.344,20.618,n/a,n/a,61.1,61.7,throttled=0x0,3.85,ok
