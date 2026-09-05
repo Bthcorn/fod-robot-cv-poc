@@ -232,7 +232,7 @@ All four variables default to the `poc-v1-480` build (`fod-a`, 480, 0.001). Non-
 Windows options, same `HEF_*` variables both ways:
 
 - **Docker** (`hailo-compile/hailo-compile.ps1`) -- identical container payload, PowerShell syntax. No Rosetta/AVX concern, amd64 runs natively.
-- **WSL2, no Docker** (`hailo-compile/hailo-compile-wsl.ps1` / `.sh`) -- installs the DFC wheel into a persistent WSL2 venv, one less layer than Docker. `HEF_GPU=1` runs the fine-tuning step on an NVIDIA GPU via WSL2's CUDA passthrough (needs the NVIDIA WSL-CUDA driver on the Windows host, nothing inside WSL). Script confirms with `tf.config.list_physical_devices('GPU')`. Unverified: whether DFC 3.34.0's TF pin has matching `tensorflow[and-cuda]` wheels -- wheel's gated, couldn't check.
+- **WSL2, no Docker** (`hailo-compile/hailo-compile-wsl.ps1` / `.sh`) -- installs the DFC wheel into a persistent WSL2 venv, one less layer than Docker. `HEF_GPU=1` runs the fine-tuning step on an NVIDIA GPU via WSL2's CUDA passthrough (needs the NVIDIA WSL-CUDA driver on the Windows host, nothing inside WSL). Verified working on a RunPod box, where the same script takes the no-Docker path against a real CUDA driver -- DFC 3.34.0's TF pin does have matching `tensorflow[and-cuda]` wheels. Still read the `tf.config.list_physical_devices('GPU')` line the script prints: an empty list is a silent CPU fallback, which succeeds but costs 26-86 min on that step.
 
 Compile time scales with the calibration set — quantization-aware fine-tuning runs four epochs over it inside the emulated container. 510 images ≈ 26 min; 2,550 ≈ 86 min.
 

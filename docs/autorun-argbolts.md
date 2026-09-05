@@ -1,7 +1,10 @@
 # Autorun: the arg-bolts backbone sweep, end to end
 
-A runbook for an agent to launch `scripts/train_roboflow.sh`, watch it for the
-~30 hours it takes, and hand back a decision. Written to be handed to a fresh
+A runbook for an agent to launch `scripts/train_roboflow.sh`, watch it, and
+hand back a decision. Duration depends entirely on the backbone: measured on a
+4090 at 640, 60 epochs, `n` took 1,514 s and `s` 2,114 s — about an hour for the
+pair. `m` has never actually been run here, so every estimate for it below is
+extrapolation, not measurement. Written to be handed to a fresh
 agent with no memory of the session that produced it.
 
 **Point an agent at this file and say: "run docs/autorun-argbolts.md".**
@@ -91,8 +94,10 @@ never for one run, or the comparison is confounded and the sweep is wasted.
 
 ## If this is a rented pod
 
-The sweep is ~30 h and `m` is ~20 h of it, which is what makes renting a 4090
-cheaper than occupying a desktop for a day. Three things about that:
+`n` and `s` together are about an hour on a 4090 (measured: 1,514 s and
+2,114 s for 60 epochs at 640). `m` is the run that makes renting worth it
+rather than occupying a desktop — and its duration is extrapolated, never
+measured here. Three things about that:
 
 **The Hailo wheel is not part of training.** `.hef` compilation is a separate
 stage, and `pyproject.toml` carries no Hailo dependency at all — `uv sync
@@ -138,7 +143,7 @@ mkdir -p ~/Downloads && unzip -q /workspace/ARG_Bolts_FV.v3i.yolov11.zip \
 ```
 
 Either way, verify before launching — a half-unzipped export fails at epoch 0 of
-the first run, ~30 h into nothing:
+the first run, with the whole sweep queued behind it:
 
 ```bash
 ls ~/Downloads/ARG_Bolts_FV.v3i.yolov11        # expect train valid test data.yaml

@@ -184,6 +184,26 @@ the only thing standing between a bad mirror and a silently wrong `.hef`.
 
 ## Stage 2 — prepare and train
 
+**Recompiling an existing run? Skip everything below except `fodcv-prepare`.**
+If `artifacts/<run>/best.pt` already exists locally, push it and `run.json` to
+the pod and go straight to Stage 4. The pod still needs the dataset — INT8
+calibration reads `data/<dataset>/images/train` — but not the sweep:
+
+```bash
+uv run fodcv-prepare --dataset arg-bolts-4     # calibration images only
+```
+
+**And take a cheap GPU, not a 4090.** The Pod spec above is sized for `yolo11m`
+training. A compile-only box needs a GPU only for quantization-aware
+fine-tuning — four epochs over the calibration set, minutes of work at ~24%
+utilization on 4.5 GB. The ~30 min per compile that actually costs the money is
+place-and-route, which is CPU-bound and leaves the card at **0%** throughout.
+Measured on a 4090: ~25 min of partial GPU use across a 3 h 20 m rental, ~12%.
+Do not read that as "skip `HEF_GPU=1`" — CPU-only fine-tuning is 26-86 min per
+compile, so over four builds the GPU still saves 1.5-5 h. Read it as: any card
+that fits the fine-tune does the job. An RTX A4000 at $0.25/hr turns a ~$2.40
+run into ~$0.80.
+
 `docs/autorun-argbolts.md` from **Preconditions** onward, unchanged. Its
 "If this is a rented pod" section covers the transfer alternatives; Stage 1
 above replaces them.
@@ -195,8 +215,13 @@ echo $! > logs/argbolts-sweep.pid
 ```
 
 Monitor per that file. **Report the measured first-epoch time before going
-further** — on rented time it is what decides whether the ~20 h `yolo11m` probe
-gets paid for at all, and the operator may want to kill it and keep `n`/`s`.
+further** — on rented time it is what decides whether the `yolo11m` probe gets
+paid for at all, and the operator may want to kill it and keep `n`/`s`.
+
+Measured on a 4090, 60 epochs at 640: `n` 1,514 s (25.2 s/epoch), `s` 2,114 s
+(35.2 s/epoch) — about an hour for the pair, not the ~30 h this file and
+`autorun-argbolts.md` used to extrapolate from other hardware. `m` was never
+run, so its estimate is still unmeasured.
 
 ---
 
@@ -231,26 +256,52 @@ Every one of those is load-bearing:
   silently letterbox 640-trained weights.
 - **`HEF_FRACTION=0.3`.** arg-bolts has 8,891 train images and calibrating on
   all of them is hours of DFC time. Hailo warns below 1,024; `poc-v2` used
-  2,550; 0.3 gives ~2,667. Note that Ultralytics takes the *first* N in sorted
-  order, not a sample.
-- **No `--a16-cls`.** That exists for the 7-class head INT8 silenced
-  (`bfcccc7`). arg-bolts is 4 classes and 4-class heads survived a8 on this
-  toolchain. Adding it costs latency and size for nothing.
+  2,550; 0.3 gives ~2,667. **Ultralytics takes the *first* N in sorted order,
+  not a sample — and that turns out to be better than balancing it.** The slice
+  is bolt 70.0 / nut 20.6 / screw 3.5 / washer 5.9 percent of boxes against a
+  whole-split 60.9 / 20.7 / 8.6 / 9.8, so `screw` is under-sampled 2.5x. That
+  reads like a bug. It was tested and it is not. Same host, same versions,
+  `arg-bolts-4-n-640` litert int8 over 200 images:
+
+  | calibration | mAP50 | bolt | nut | screw | washer |
+  |---|---:|---:|---:|---:|---:|
+  | sorted head slice | **0.4170** | 0.735 | 0.547 | 0.128 | 0.258 |
+  | seeded shuffle | 0.3446 | 0.511 | 0.504 | 0.095 | 0.270 |
+
+  Balancing cost 17% overall, and `screw` got *worse* with 2.4x the
+  representation. INT8 has 256 levels either way: a homogeneous slice keeps each
+  layer's activation range narrow and its steps fine, while a shuffled one spans
+  every lighting condition and scale in the dataset and widens the ranges. Do not
+  "fix" this without re-measuring — a Mac-built and a pod-built artifact from the
+  same calibration scored 0.4170 and 0.417, so the gate is reliable enough to
+  settle it in about an hour.
+
 - **`HEF_CONF=0.001`** keeps the benchmark row comparable to the host-NMS
   backends. A **deploy** `.hef` wants 0.10–0.25 instead — the compiled value is
   a floor on the Pi that `--conf` can only filter above, so shipping 0.001 means
   shipping a model that cannot be made quieter. Compile the deploy one
   separately when the run is chosen; do not guess which the operator wants.
 
-**`HEF_GPU=1` is unverified.** `hailo-compile-wsl.sh:40` says so: nobody could
-check whether DFC 3.34.0's pinned TensorFlow has matching
-`tensorflow[and-cuda]` wheels, because the wheel is gated. A pod has a real
-driver rather than WSL passthrough, so it is a better bet here — but trust the
-`tf.config.list_physical_devices('GPU')` line the script prints, not the flag.
-**Empty list means it silently fell back to CPU**: the compile still succeeds,
-it just takes 26–86 min for that step. Report which happened.
+**`HEF_GPU=1` works.** It was written unverified — DFC 3.34.0's pinned
+TensorFlow is gated behind the Developer Zone, so nobody could check it had
+matching `tensorflow[and-cuda]` wheels. It has been run on a pod since and the
+fine-tuning step does land on the GPU. Still read the
+`tf.config.list_physical_devices('GPU')` line the script prints rather than
+trusting the flag: **an empty list means it silently fell back to CPU**, which
+still succeeds, it just costs 26–86 min for that step instead. Report which
+happened.
 
-Expect the whole compile to take well over an hour. `export USER=root` is
+Measured, on a 4090 pod with the GPU actually engaged: **~35 min per compile**,
+so **~2 h 25 m** for the four builds (two models × conf 0.001 and 0.15).
+
+The GPU is the fast part. Fine-tuning is four epochs over ~2,667 calibration
+images and takes minutes; Layer Noise Analysis about two. The bulk is
+place-and-route — `Iteration #50 - 3 contexts, Searching for a better
+partition...` — an iterative search for a graph partition that fits the chip's
+contexts. It is CPU-bound and does not spread across cores, so a 96-vCPU box
+finishes no sooner than a small one. `yolo11s` at 640 needs 3 contexts against
+`yolo11n`'s 2 and searches proportionally longer. Budget by context count, not
+by GPU. `export USER=root` is
 handled by the Docker script, not this one — this path assumes a real user, and
 on a root pod `$USER` is set, so it is fine. If place-and-route dies with
 `KeyError: 'USER'`, export it and rerun.
