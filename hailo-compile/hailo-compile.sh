@@ -113,4 +113,5 @@ fodcv-export \
   --conf "${HEF_CONF:-0.001}" \
   --formats hailo --precisions int8 \
   ${HEF_FRACTION:+--calib-fraction "$HEF_FRACTION"} \
-  ${HEF_FORCE:+--force} ${HEF_A16_CLS:+--a16-cls}
+  ${HEF_FORCE:+--force} ${HEF_A16_CLS:+--a16-cls} \
+  ${HEF_A16_ALL:+--a16-all} ${HEF_OPT_LEVEL:+--opt-level "$HEF_OPT_LEVEL"}

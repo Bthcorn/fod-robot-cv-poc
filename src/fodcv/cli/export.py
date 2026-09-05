@@ -34,6 +34,14 @@ def main():
                         help="hailo only: compile the detect head's class convs at 16-bit. "
                              "Costs latency and size; buys back a class head that INT8 "
                              "silenced. See export.a16_classification_head")
+    parser.add_argument("--a16-all", action="store_true",
+                        help="hailo only: 16-bit on every output conv, regression included. "
+                             "--a16-cls widens only the class convs; if the box branch is "
+                             "also losing range this shows it. See export.a16_all_outputs")
+    parser.add_argument("--opt-level", type=int, default=None, choices=range(5),
+                        help="hailo only: DFC model_optimization_flavor level. Ultralytics "
+                             "hardcodes 2; 3-4 add bias correction and AdaRound, which cost "
+                             "compile time, not runtime. See export.raise_optimization_level")
     args = parser.parse_args()
 
     export.run(
@@ -47,6 +55,8 @@ def main():
         conf=args.conf,
         calib_fraction=args.calib_fraction,
         a16_cls=args.a16_cls,
+        a16_all=args.a16_all,
+        opt_level=args.opt_level,
     )
 
 
