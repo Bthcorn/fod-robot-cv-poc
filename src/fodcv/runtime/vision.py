@@ -14,7 +14,8 @@ magnet arc under a rotating shell, no gripper and no targeting -- so nothing eve
 steers toward an object, and the speed policy is the only consumer. That reduces
 to one boolean per frame, which is `zone_blocked()`. `latest()` is there for
 logging, a HUD, and the telemetry heatmap; branching on it is not the main path.
-See docs/INTEGRATION.md.
+`detail()` is the opt-in record for the log -- what those two deliberately hide,
+in one JSON-serialisable dict. See docs/INTEGRATION.md.
 
 Capture runs on its own daemon thread, so the robot's loop is never blocked by a
 20 ms frame grab and a multi-second retrieval routine does not leave a backlog of
@@ -40,7 +41,7 @@ import json
 import math
 import threading
 import time
-from collections import namedtuple
+from collections import deque, namedtuple
 from pathlib import Path
 
 import cv2
@@ -56,6 +57,9 @@ TRAIN_SCALE = 0.111
 
 STAGES = ("capture", "preprocess", "infer", "postprocess", "total")
 WARMUP = 5  # frames excluded from the timing stats
+# ponytail: a window, not a leak. ~5.5 min at 30 FPS; the robot never reads stats
+# and the CLI's timing table wants recent frames, not a patrol's worth of floats.
+STATS_MAX = 10_000
 
 #: What the robot loop consumes. `state` is confidence over time, `action` is what
 #: the class means -- see fodcv.runtime.policy for why they are two fields.
@@ -201,10 +205,17 @@ def in_zone(tracks, lookahead, frame_size):
     `lookahead` is a (lo, hi) fraction of frame height, and `frame_size` is
     post-rotation, so this is measured in the same frame the boxes are.
     """
+    return any(track_in_zone(t, lookahead, frame_size)
+               for t in tracks if t.state() == "CONFIRM")
+
+
+def track_in_zone(track, lookahead, frame_size):
+    """Is this track's centroid inside the strip? Geometry only -- `in_zone` adds
+    the CONFIRM condition, and `detail()` reports both so a log can say which
+    track blocked and which merely sat there unconfirmed."""
     lo, hi = lookahead
     height = frame_size[1]
-    return any(lo * height <= track.centroid[1] <= hi * height
-               for track in tracks if track.state() == "CONFIRM")
+    return lo * height <= track.centroid[1] <= hi * height
 
 
 def to_targets(tracks):
@@ -263,7 +274,7 @@ class Vision:
         # the chip scores every class and costs the same either way.
         self._shown = {self.classes.index(name) for name in wanted}
 
-        self.stats = {name: [] for name in STAGES}
+        self.stats = {name: deque(maxlen=STATS_MAX) for name in STAGES}
         #: Highest score the chip emitted per class on the last frame, before
         #: `conf` and before `--classes`. "Found nothing" and "the filter hid it"
         #: are the same `0 det` on a HUD; this is what tells them apart.
@@ -273,6 +284,9 @@ class Vision:
         self._targets = []
         self._blocked = False
         self._stamp = 0.0
+        self._detail_tracks = []  # for detail(): plain dicts, never a live Track
+        self._stage_ms = {}
+        self._focus_m = None  # last focus_state() reading; detail() must not wait a frame
         self._error = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -285,6 +299,10 @@ class Vision:
     # -- lifecycle ----------------------------------------------------------------
 
     def __enter__(self):
+        # Single-use. After __exit__ the stop flag is set, so a re-entered loop
+        # would return at once -- handing back a Vision whose age grows and whose
+        # zone reads "clear", the one failure this module exists to prevent.
+        assert not self._stop.is_set(), "Vision is single-use; construct a new one"
         self._open_camera()
         self._thread = threading.Thread(target=self._loop, name="fodcv-vision", daemon=True)
         self._thread.start()
@@ -340,6 +358,36 @@ class Vision:
         with self._lock:
             return self._frame, list(self._targets)
 
+    def detail(self):
+        """The last frame as one JSON-serialisable dict. Opt-in: call it or don't.
+
+        `zone_blocked()` and `latest()` are the contract the loop branches on, and
+        they hide things on purpose -- tracks coasting on their miss budget, the raw
+        score under the EMA, which track sat in the strip, why the thread died.
+        This is where those live, for the log, the telemetry heatmap and the M-12
+        retune. Read under one lock so every field describes the same frame.
+
+        Never raises. The caller asking for diagnostics is the caller who most
+        needs to hear that the thread is dead, so that goes in `error` instead.
+        """
+        with self._lock:
+            tracks = [dict(t) for t in self._detail_tracks]
+            stage_ms = dict(self._stage_ms)
+            blocked = self._blocked
+        return {
+            "frame_id": self.frame_id,
+            "age": self.age,
+            "blocked": blocked,
+            "fps": self.fps,
+            "stage_ms": stage_ms,
+            "top_scores": dict(zip(self.classes, self.top_scores)),
+            "camera": {"zoom": self.zoom, "rotate": self.rotate, "conf": self.conf,
+                       "frame_size": self.frame_size, "imgsz": self.imgsz,
+                       "focus_m": self._focus_m},
+            "tracks": tracks,
+            "error": None if self._error is None else repr(self._error),
+        }
+
     @property
     def age(self):
         """Seconds since the last completed frame. inf before the first one."""
@@ -347,7 +395,7 @@ class Vision:
 
     @property
     def fps(self):
-        recent = self.stats["total"][-30:]
+        recent = list(self.stats["total"])[-30:]  # a deque does not slice
         return 1000 / (sum(recent) / len(recent)) if recent else 0.0
 
     @property
@@ -400,7 +448,8 @@ class Vision:
         """
         metadata = self._picam.capture_metadata()
         lens = metadata.get("LensPosition") or 0.0
-        return (1.0 / lens if lens else math.inf), metadata.get("FocusFoM", 0)
+        self._focus_m = 1.0 / lens if lens else math.inf
+        return self._focus_m, metadata.get("FocusFoM", 0)
 
     # -- internals ----------------------------------------------------------------
 
@@ -510,15 +559,26 @@ class Vision:
         for track in tracks:
             track.box = by_centroid.get(track.centroid, getattr(track, "box", None))
         t4 = time.perf_counter()
+        stage_ms = dict(zip(STAGES, ((t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000,
+                                     (t4 - t3) * 1000, (t4 - t0) * 1000)))
 
         with self._lock:
             self._frame = bgr
             self._targets = to_targets(tracks)
             self._blocked = in_zone(tracks, self.lookahead, self.frame_size)
             self._stamp = time.monotonic()
+            self._stage_ms = stage_ms
+            # Values, never the Track: the consumer must not touch an object this
+            # thread mutates on the next frame. Every live track, coasting included.
+            self._detail_tracks = [
+                {"id": t.id, "state": t.state(), "action": t.action(), "cls": t.cls,
+                 "conf": t.ema_conf, "raw": t.raw, "hits": t.hits, "misses": t.misses,
+                 "box": t.box, "centroid": t.centroid,
+                 "in_zone": track_in_zone(t, self.lookahead, self.frame_size)}
+                for t in tracks]
         self.frame_id += 1
 
         if self.frame_id > WARMUP:  # warmup frames are not representative
-            for name, ms in zip(STAGES, ((t1 - t0), (t2 - t1), (t3 - t2), (t4 - t3), (t4 - t0))):
-                self.stats[name].append(ms * 1000)
+            for name, ms in stage_ms.items():
+                self.stats[name].append(ms)
         return tracks

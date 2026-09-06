@@ -3,7 +3,10 @@
 import argparse
 
 from fodcv.paths import CURRENT_DATASET, STOCK_WEIGHTS
-from fodcv.research import training
+try:
+    from fodcv.research import training
+except ImportError as e:  # the robot's base install has no ultralytics, by design
+    raise SystemExit(f"{e}\nfodcv-train needs the research extra: pip install 'fod-vision[research]'")
 
 
 def setting(text: str) -> tuple[str, object]:

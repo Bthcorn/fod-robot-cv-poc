@@ -11,12 +11,10 @@ src/fodcv/          the package. runtime/ is what the robot imports, research/ i
                     Mac-only,
                     bench/ measures, the top level is shared.
 src/fodcv/cli/      one module per command: argparse, then the call into the
-                    package module that does the work. The two camera helpers
-                    are self-contained -- Mac-only stand-ins, not pipeline
-                    steps. Wired to console scripts in pyproject.toml -- see
-                    Commands below.
-                    camera_hailo and robot_stub run on the Pi with the
-                    *system* interpreter, not the venv.
+                    package module that does the work. Wired to console scripts
+                    in pyproject.toml -- see Commands below. camera_hailo and
+                    robot_stub run on the Pi with the *system* interpreter, not
+                    the venv; the rest need the research extra and say so.
 tests/
 data/<dataset-id>/  a prepared dataset. Mac-side, gitignored, rebuildable.
 runs/               Ultralytics' scratch: checkpoints, plots, benchmark CSVs.
@@ -158,11 +156,11 @@ failure is stored and re-raised from the next `latest()` or `zone_blocked()` —
 camera must not read as "no debris, keep patrolling".
 
 Install it into the Pi's **system** interpreter, which is where picamera2 and
-`hailo_platform` live:
+`hailo_platform` live, from the wheel on the release:
 
 ```
 sudo python3.11 -m pip install --break-system-packages \
-  'fod-vision @ git+https://github.com/Bthcorn/fod-robot-cv-poc.git@v0.2.0'
+  https://github.com/Bthcorn/fod-robot-cv-poc/releases/download/v0.3.0/fod_vision-0.3.0-py3-none-any.whl
 ```
 
 That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is
@@ -171,24 +169,28 @@ effectively nothing — and no torch. Nothing under `runtime/` imports `ultralyt
 `yaml`; `fodcv/cli/camera_hailo.py` imports `Vision` like any other consumer, which is what
 keeps the interface exercised by the tool that produced every number in `RESULT.md`.
 
-### The deploy bundle
+### Cutting a release
 
-The `.hef` is gitignored. Ship three files, ~7.8 MB, as a release asset on the same tag the
-robot pins — not an rsync, so "which model is on the board" has an answer:
+The `.hef` is gitignored, so a release is the one place code and model meet: one tag
+carries the wheel, the model bundle and their checksums, and "which model is on the
+board" has an answer. From a clean `main`, with `gh` logged in:
 
 ```
-tar czf arg-bolts-4-n-640.tar.gz \
-  artifacts/arg-bolts-4-n-640/run.json \
-  artifacts/arg-bolts-4-n-640/bench_int8_hailo_model_conf00001/
-gh release create v0.3.0 arg-bolts-4-n-640.tar.gz
+NOTES=artifacts/arg-bolts-4-n-640/SHIPPING_640_conf0001_2026-09-06/README.txt \
+  bash scripts/release.sh 0.3.0
 ```
 
-`run.json` and `nms_config.json` travel with the `.hef` because the class names and the
-input size are read off them at load time, not hardcoded.
+The script bumps the version, runs the tests, builds the wheel, tars whatever
+`paths.DEPLOY_HEF` points at (so the bundle cannot drift from the code), proves the
+extracted bundle loads through the wheel in a clean Python 3.11, and only then tags,
+pushes and creates the GitHub release. Bundle layout and the Pi-side install are in
+[`docs/INTEGRATION.md`](docs/INTEGRATION.md) §1–§2 — the one place they are written down.
+GitHub Packages has no PyPI registry, so a Release asset is the publish target; `uv publish`
+would only be needed for PyPI, which nothing here consumes.
 
 **Not `bench_int8_hailo_model/`.** That directory in this run holds the conf 0.001
-build, which scores 0.0000 mAP50 -- RESULT.md §13. The shipping build is the 0.0001
-variant and the bundle must carry that one.
+build, which scores 0.0000 mAP50 -- RESULT.md §13. `DEPLOY_HEF` names the 0.0001
+variant explicitly, and the script ships whatever it names.
 
 ## Export on the Mac, benchmark on the Pi
 

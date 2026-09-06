@@ -3,7 +3,10 @@
 import argparse
 
 from fodcv.paths import CURRENT_DATASET
-from fodcv.research import smoke
+try:
+    from fodcv.research import smoke
+except ImportError as e:  # the robot's base install has no ultralytics, by design
+    raise SystemExit(f"{e}\nfodcv-smoke needs the research extra: pip install 'fod-vision[research]'")
 
 
 def main():

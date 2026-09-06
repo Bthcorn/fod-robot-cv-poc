@@ -155,3 +155,13 @@ def test_tune_refuses_a_misspelled_constant():
     with pytest.raises(AssertionError, match="CONFIRM_THRESHOLD"):
         policy.tune(CONFIRM_THRESHOLD=0.7)
     assert policy.CONFIRM_THRESH == 0.5, "and nothing was applied"
+
+
+def test_a_track_keeps_its_raw_score_and_counts_its_hits():
+    """detail() reports raw beside the EMA -- the pair M-12 tunes the thresholds
+    on -- and hits/misses is how long the track has lived."""
+    tracks = match_tracks([], [((10, 10), 0.9)])
+    tracks = match_tracks(tracks, [((10, 10), 0.3)])
+    (track,) = tracks
+    assert (track.hits, track.misses, track.raw) == (2, 0, 0.3)
+    assert track.ema_conf == pytest.approx(policy.EMA_ALPHA * 0.3 + (1 - policy.EMA_ALPHA) * 0.9)

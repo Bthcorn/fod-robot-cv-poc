@@ -81,6 +81,10 @@ class Track:
         self.centroid = centroid
         self.cls = cls
         self.ema_conf = conf
+        # The pair detail() reports and M-12 tunes on: what the chip said this
+        # frame against what the EMA believes. hits + misses is the track's age.
+        self.raw = conf
+        self.hits = 1
         self.misses = 0
         self._state = "IGNORE"
         self._reclassify()
@@ -89,6 +93,8 @@ class Track:
         self.centroid = centroid
         if cls is not None:
             self.cls = cls
+        self.raw = conf
+        self.hits += 1
         self.ema_conf = EMA_ALPHA * conf + (1 - EMA_ALPHA) * self.ema_conf
         self.misses = 0
         self._reclassify()

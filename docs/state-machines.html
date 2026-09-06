@@ -1,0 +1,448 @@
+<title>FOD Vision State Machines</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Literata:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #EDF1EF;
+    --panel: #FFFFFF;
+    --ink: #1B2422;
+    --muted: #5B6866;
+    --line: #8D9A97;
+    --accent: #25656B;
+    --comp-tint: rgba(37, 101, 107, 0.06);
+    --confirm: #2E8B3D;
+    --confirm-tint: rgba(46, 139, 61, 0.13);
+    --caution: #B7860B;
+    --caution-tint: rgba(183, 134, 11, 0.14);
+    --ignore: #6F7A78;
+    --ignore-tint: rgba(111, 122, 120, 0.14);
+    --fail: #B93A2E;
+    --code-bg: rgba(27, 36, 34, 0.06);
+    --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+    --body: "Literata", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #141A19;
+      --panel: #1D2524;
+      --ink: #E6ECEA;
+      --muted: #9AA8A5;
+      --line: #57655F;
+      --accent: #5FB8BF;
+      --comp-tint: rgba(95, 184, 191, 0.07);
+      --confirm: #50DC50;
+      --confirm-tint: rgba(80, 220, 80, 0.12);
+      --caution: #FFC800;
+      --caution-tint: rgba(255, 200, 0, 0.12);
+      --ignore: #AAAAAA;
+      --ignore-tint: rgba(170, 170, 170, 0.12);
+      --fail: #F0655A;
+      --code-bg: rgba(230, 236, 234, 0.07);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #141A19;
+    --panel: #1D2524;
+    --ink: #E6ECEA;
+    --muted: #9AA8A5;
+    --line: #57655F;
+    --accent: #5FB8BF;
+    --comp-tint: rgba(95, 184, 191, 0.07);
+    --confirm: #50DC50;
+    --confirm-tint: rgba(80, 220, 80, 0.12);
+    --caution: #FFC800;
+    --caution-tint: rgba(255, 200, 0, 0.12);
+    --ignore: #AAAAAA;
+    --ignore-tint: rgba(170, 170, 170, 0.12);
+    --fail: #F0655A;
+    --code-bg: rgba(230, 236, 234, 0.07);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  .page { max-width: 1040px; margin: 0 auto; padding: 40px 24px 64px; }
+  .prose { max-width: 66ch; }
+  header { display: grid; gap: 10px; margin-bottom: 36px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: var(--display); font-weight: 700; font-size: 44px; line-height: 1.02;
+    letter-spacing: -0.01em; margin: 0; text-wrap: balance;
+  }
+  .stand { font-size: 18px; color: var(--ink); margin: 0; max-width: 60ch; }
+  .stand strong { font-weight: 600; }
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: 28px; line-height: 1.1;
+    margin: 48px 0 8px; text-wrap: balance;
+  }
+  h2 .n { color: var(--accent); margin-right: 8px; }
+  p { margin: 0 0 12px; }
+  code {
+    font-family: var(--mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .chain {
+    display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline;
+    font-family: var(--mono); font-size: 13px; color: var(--muted); margin: 18px 0 0;
+  }
+  .chain span { white-space: nowrap; }
+  .chain .arrow { color: var(--accent); }
+
+  figure { margin: 18px 0 0; }
+  .frame {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 18px 16px 10px; overflow-x: auto;
+  }
+  .d {
+    display: block; width: 100%; min-width: 760px; height: auto;
+    color: var(--ink); font-family: var(--mono);
+  }
+  figcaption { font-size: 14.5px; color: var(--muted); margin: 10px 4px 0; max-width: 80ch; }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  .d .e { fill: none; stroke: var(--ink); stroke-width: 1.2; }
+  .d .e.fail { stroke: var(--fail); }
+  .d .mk-fail { fill: var(--fail); }
+  .d .thr { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+  .d .st { fill: var(--panel); stroke: var(--ink); stroke-width: 1.2; }
+  .d .st.failbox { stroke: var(--fail); }
+  .d .comp { fill: var(--comp-tint); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 3; }
+  .d .comp-title { fill: var(--accent); font-weight: 500; }
+  .d .name { font-size: 11.5px; font-weight: 500; fill: var(--ink); }
+  .d .step { font-size: 11px; fill: var(--ink); }
+  .d .t { font-size: 10px; fill: var(--ink); }
+  .d .lbl { font-size: 9.5px; fill: var(--muted); }
+  .d .sm { font-size: 9px; }
+  .d .dot { fill: var(--ink); }
+  .d .ring { fill: none; stroke: var(--ink); stroke-width: 1.2; }
+  .d .b-confirm { fill: var(--confirm-tint); }
+  .d .b-caution { fill: var(--caution-tint); }
+  .d .b-ignore { fill: var(--ignore-tint); }
+  .d .c-confirm { fill: var(--confirm); }
+  .d .c-caution { fill: var(--caution); }
+  .d .c-ignore { fill: var(--ignore); }
+  .d .c-fail { fill: var(--fail); }
+  .d .brk { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+  .d .c-accent { fill: var(--accent); }
+
+  details { margin: 10px 4px 0; font-size: 14px; }
+  summary { cursor: pointer; color: var(--accent); font-family: var(--mono); font-size: 12.5px; }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  pre {
+    margin: 8px 0 0; padding: 12px 14px; background: var(--code-bg); border-radius: 6px;
+    overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+  }
+  .refs {
+    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted); line-height: 1.7;
+  }
+  .refs span { display: block; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">fod-vision · fodcv.runtime · read against src/fodcv/runtime/vision.py, policy.py and cli/robot_stub.py</div>
+    <h1>FOD Vision State Machines</h1>
+    <p class="stand">Three machines, one inside the next. The <strong>Vision object</strong> runs a capture thread; every frame that thread produces moves <strong>tracks</strong> through a confidence hysteresis; and the robot's loop turns one boolean from those tracks into a <strong>commanded speed</strong>.</p>
+    <div class="chain">
+      <span>Vision lifecycle</span><span class="arrow">▸</span>
+      <span>frame cycle</span><span class="arrow">▸</span>
+      <span>track state</span><span class="arrow">▸</span>
+      <span>zone_blocked() · age</span><span class="arrow">▸</span>
+      <span>STOP / SLOW / FAST</span>
+    </div>
+  </header>
+
+  <!-- ============================================================ 1 -->
+  <div class="prose">
+    <h2><span class="n">1</span>The Vision object</h2>
+    <p>Constructing <code>Vision</code> only reads the bundle. Entering the <code>with</code> block opens the camera, starts the daemon thread and waits for the Hailo device; the thread then loops the six-step frame cycle until the block ends. Anything the thread raises parks the object in <em>Failed</em> for good.</p>
+  </div>
+  <figure>
+    <div class="frame">
+      <svg class="d" viewBox="0 0 1000 340" role="img" aria-label="Vision object lifecycle: Constructed, Starting, Running with its six-step frame cycle, Failed, Stopped">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+          <marker id="a1f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-fail"/></marker>
+        </defs>
+
+        <circle cx="16" cy="60" r="5" class="dot"/>
+        <path d="M22 60H88" class="e" marker-end="url(#a1)"/>
+        <text x="52" y="50" text-anchor="middle" class="lbl">Vision(hef=…)</text>
+
+        <rect x="90" y="40" width="160" height="40" rx="6" class="st"/>
+        <text x="170" y="64" text-anchor="middle" class="name">CONSTRUCTED</text>
+        <text x="170" y="96" text-anchor="middle" class="lbl">reads run.json + nms_config.json, validates</text>
+
+        <path d="M250 60H338" class="e" marker-end="url(#a1)"/>
+        <text x="294" y="52" text-anchor="middle" class="lbl">with … as v</text>
+
+        <rect x="340" y="40" width="120" height="40" rx="6" class="st"/>
+        <text x="400" y="64" text-anchor="middle" class="name">STARTING</text>
+        <path d="M400 80V108" class="e" marker-end="url(#a1)"/>
+        <text x="408" y="98" class="lbl">Hailo ready, thread up</text>
+
+        <path d="M400 40V20H990V250H981" class="e" marker-end="url(#a1)"/>
+        <text x="700" y="14" text-anchor="middle" class="lbl">no Hailo device within 30 s → TimeoutError, camera released</text>
+
+        <path d="M460 60H905V118" class="e fail" marker-end="url(#a1f)"/>
+        <text x="682" y="54" text-anchor="middle" class="lbl">thread raised before ready → re-raised by with</text>
+
+        <rect x="20" y="110" width="750" height="160" rx="8" class="comp"/>
+        <text x="32" y="128" class="t comp-title">RUNNING — daemon thread, one cycle per sensor frame (33 ms)</text>
+
+        <rect x="34" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="84" y="168" text-anchor="middle" class="step">capture</text>
+        <text x="84" y="200" text-anchor="middle" class="lbl">waits on sensor</text>
+        <text x="84" y="212" text-anchor="middle" class="lbl">~20 ms of the 33</text>
+        <path d="M134 164H156" class="e" marker-end="url(#a1)"/>
+
+        <rect x="158" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="208" y="168" text-anchor="middle" class="step">preprocess</text>
+        <text x="208" y="200" text-anchor="middle" class="lbl">rotate, letterbox</text>
+        <text x="208" y="212" text-anchor="middle" class="lbl">BGR→RGB, ~1 ms</text>
+        <path d="M258 164H280" class="e" marker-end="url(#a1)"/>
+
+        <rect x="282" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="332" y="168" text-anchor="middle" class="step">infer</text>
+        <text x="332" y="200" text-anchor="middle" class="lbl">Hailo-8 + NMS</text>
+        <text x="332" y="212" text-anchor="middle" class="lbl">~24 ms at 640</text>
+        <path d="M382 164H404" class="e" marker-end="url(#a1)"/>
+
+        <rect x="406" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="456" y="168" text-anchor="middle" class="step">decode</text>
+        <text x="456" y="200" text-anchor="middle" class="lbl">conf ≥ 0.25</text>
+        <text x="456" y="212" text-anchor="middle" class="lbl">un-letterbox</text>
+        <path d="M506 164H528" class="e" marker-end="url(#a1)"/>
+
+        <rect x="530" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="580" y="168" text-anchor="middle" class="step">track</text>
+        <text x="580" y="200" text-anchor="middle" class="lbl">match ≤ 80 px, EMA</text>
+        <text x="580" y="212" text-anchor="middle" class="lbl">misses, hysteresis</text>
+        <path d="M630 164H652" class="e" marker-end="url(#a1)"/>
+
+        <rect x="654" y="146" width="100" height="36" rx="5" class="st"/>
+        <text x="704" y="168" text-anchor="middle" class="step">publish</text>
+        <text x="704" y="200" text-anchor="middle" class="lbl">targets, blocked</text>
+        <text x="704" y="212" text-anchor="middle" class="lbl">stamp, detail</text>
+
+        <path d="M754 164H766V246H26V164H32" class="e" marker-end="url(#a1)"/>
+        <text x="394" y="240" text-anchor="middle" class="lbl">next frame — the sensor sets the pace, 30 FPS</text>
+
+        <path d="M770 150H828" class="e fail" marker-end="url(#a1f)"/>
+        <text x="800" y="143" text-anchor="middle" class="lbl sm">raises</text>
+        <path d="M770 250H828" class="e" marker-end="url(#a1)"/>
+        <text x="800" y="243" text-anchor="middle" class="lbl sm">with ends</text>
+
+        <rect x="830" y="120" width="150" height="70" rx="6" class="st failbox"/>
+        <text x="905" y="141" text-anchor="middle" class="name c-fail">FAILED</text>
+        <text x="905" y="158" text-anchor="middle" class="lbl sm">latest(), zone_blocked()</text>
+        <text x="905" y="172" text-anchor="middle" class="lbl sm">raise; age keeps growing</text>
+        <path d="M905 190V228" class="e" marker-end="url(#a1)"/>
+        <text x="911" y="213" class="lbl">with ends</text>
+
+        <rect x="830" y="230" width="150" height="40" rx="6" class="st"/>
+        <text x="905" y="254" text-anchor="middle" class="name">STOPPED</text>
+        <path d="M905 270V282" class="e" marker-end="url(#a1)"/>
+        <circle cx="905" cy="294" r="9" class="ring"/>
+        <circle cx="905" cy="294" r="5" class="dot"/>
+      </svg>
+    </div>
+    <figcaption><b>One object, one thread, one direction.</b> Failed is terminal: every later <code>latest()</code> or <code>zone_blocked()</code> re-raises, <code>age</code> keeps growing, <code>detail()["error"]</code> names the cause. A stopped Vision cannot be re-entered; build a new one.</figcaption>
+  </figure>
+  <details>
+    <summary>Mermaid source — paste into Obsidian or GitHub</summary>
+<pre>stateDiagram-v2
+    [*] --> Constructed: Vision(hef=…) reads run.json + nms_config.json
+    Constructed --> Starting: with Vision(…) as v
+    Starting --> Running: Hailo ready, thread up (≤ 30 s)
+    Starting --> Failed: thread raised before ready
+    Starting --> Stopped: no device in 30 s, TimeoutError
+    state Running {
+        [*] --> capture
+        capture --> preprocess: ~20 ms, waits on sensor
+        preprocess --> infer: rotate, letterbox 640, RGB
+        infer --> decode: Hailo-8, NMS on chip, ~24 ms
+        decode --> track: conf ≥ 0.25, un-letterbox
+        track --> publish: match ≤ 80 px, EMA, misses
+        publish --> capture: next frame, 30 FPS
+    }
+    Running --> Failed: thread raised
+    Running --> Stopped: with block ends
+    Failed --> Stopped: with block ends
+    Stopped --> [*]</pre>
+  </details>
+
+  <!-- ============================================================ 2 -->
+  <div class="prose">
+    <h2><span class="n">2</span>One track</h2>
+    <p>A track has two independent axes, and the flicker on each is damped by a different mechanism. Its <em>state</em> is where the confidence EMA sits between two thresholds, promoted at 0.5 and demoted only below 0.25. Its <em>presence</em> is a miss counter: an unmatched frame freezes the track instead of dropping it, and only the sixth miss ends it.</p>
+  </div>
+  <figure>
+    <div class="frame">
+      <svg class="d" viewBox="0 0 1000 300" role="img" aria-label="Track state on two axes: confidence bands IGNORE, CAUTION, CONFIRM with promote at 0.5 and demote below 0.25; presence states SEEN, COASTING, dropped after the sixth miss">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        </defs>
+
+        <text x="70" y="20" class="t">Confidence: the EMA decides the state</text>
+        <rect x="70" y="30" width="450" height="110" class="b-confirm"/>
+        <rect x="70" y="140" width="450" height="55" class="b-caution"/>
+        <rect x="70" y="195" width="450" height="55" class="b-ignore"/>
+        <path d="M70 30V250" class="e"/>
+        <path d="M70 140H520" class="thr"/>
+        <path d="M70 195H520" class="thr"/>
+        <text x="62" y="34" text-anchor="end" class="lbl">1.0</text>
+        <text x="62" y="144" text-anchor="end" class="lbl">0.5</text>
+        <text x="62" y="199" text-anchor="end" class="lbl">0.25</text>
+        <text x="62" y="254" text-anchor="end" class="lbl">0</text>
+
+        <text x="84" y="58" class="name c-confirm">CONFIRM</text>
+        <text x="84" y="74" class="lbl">zone_blocked() counts it</text>
+        <text x="84" y="166" class="name c-caution">CAUTION</text>
+        <text x="84" y="180" class="lbl">slow down, not committed</text>
+        <text x="84" y="222" class="name c-ignore">IGNORE</text>
+        <text x="84" y="236" class="lbl">tracked, not acted on</text>
+
+        <text x="240" y="160" class="lbl">inside this band the state does not move:</text>
+        <text x="240" y="172" class="lbl">confirmed stays CONFIRM — the latch;</text>
+        <text x="240" y="184" class="lbl">never-confirmed stays CAUTION</text>
+
+        <path d="M480 185V105" class="e" marker-end="url(#a2)"/>
+        <text x="474" y="128" text-anchor="end" class="lbl c-confirm">≥ 0.5: promote</text>
+        <path d="M505 150V230" class="e" marker-end="url(#a2)"/>
+        <text x="511" y="205" class="lbl c-ignore">&lt; 0.25: demote</text>
+
+        <text x="640" y="20" class="t">Presence: matched or coasting</text>
+        <circle cx="710" cy="36" r="5" class="dot"/>
+        <path d="M710 42V68" class="e" marker-end="url(#a2)"/>
+        <text x="718" y="58" class="lbl">new detection, EMA = raw</text>
+
+        <rect x="640" y="70" width="140" height="44" rx="6" class="st"/>
+        <text x="710" y="88" text-anchor="middle" class="name">SEEN</text>
+        <text x="710" y="102" text-anchor="middle" class="lbl">matched this frame</text>
+
+        <path d="M688 114V168" class="e" marker-end="url(#a2)"/>
+        <text x="682" y="140" text-anchor="end" class="lbl">no match:</text>
+        <text x="682" y="152" text-anchor="end" class="lbl">misses +1</text>
+        <path d="M732 168V116" class="e" marker-end="url(#a2)"/>
+        <text x="738" y="140" class="lbl">match:</text>
+        <text x="738" y="152" class="lbl">misses = 0</text>
+
+        <rect x="640" y="170" width="140" height="44" rx="6" class="st"/>
+        <text x="710" y="188" text-anchor="middle" class="name">COASTING</text>
+        <text x="710" y="202" text-anchor="middle" class="lbl">misses 1–5, frozen</text>
+
+        <path d="M710 214V246" class="e" marker-end="url(#a2)"/>
+        <text x="718" y="238" class="lbl">6th miss: dropped</text>
+        <circle cx="710" cy="258" r="9" class="ring"/>
+        <circle cx="710" cy="258" r="5" class="dot"/>
+
+        <path d="M808 70H812V114H808" class="brk"/>
+        <text x="818" y="96" class="t c-accent">latest()</text>
+        <text x="818" y="108" class="lbl">what you draw</text>
+        <path d="M901 70H905V214H901" class="brk"/>
+        <text x="911" y="140" class="t c-accent">zone_blocked()</text>
+        <text x="911" y="152" class="lbl">still counts it</text>
+      </svg>
+    </div>
+    <figcaption><b>Confidence and presence flicker separately, and each has its own damper.</b> The EMA latch stops a confirmed track from chattering through the 0.25–0.5 band; the miss budget stops presence from chattering when one frame misses. That is why <code>zone_blocked()</code> can be true while <code>latest()</code> is empty: a coasting CONFIRM track still counts for up to five frames.</figcaption>
+  </figure>
+  <details>
+    <summary>Mermaid source — paste into Obsidian or GitHub</summary>
+<pre>stateDiagram-v2
+    [*] --> IGNORE: new track, raw &lt; 0.25
+    [*] --> CAUTION: new track, 0.25 ≤ raw &lt; 0.5
+    [*] --> CONFIRM: new track, raw ≥ 0.5
+    IGNORE --> CAUTION: EMA ≥ 0.25
+    IGNORE --> CONFIRM: EMA ≥ 0.5
+    CAUTION --> CONFIRM: EMA ≥ 0.5
+    CAUTION --> IGNORE: EMA &lt; 0.25
+    CONFIRM --> IGNORE: EMA &lt; 0.25, latched through the band
+    note right of CONFIRM: zone_blocked() counts it while misses ≤ 5
+    IGNORE --> [*]: 6th missed frame
+    CAUTION --> [*]: 6th missed frame
+    CONFIRM --> [*]: 6th missed frame</pre>
+  </details>
+
+  <!-- ============================================================ 3 -->
+  <div class="prose">
+    <h2><span class="n">3</span>The robot's speed</h2>
+    <p>The control loop polls at 20 Hz and reads two things: <code>age</code> and <code>zone_blocked()</code>. Stale vision means stop, never "clear floor". A blocked zone means slow, and the robot keeps re-arming a hold-off so it stays slow until the object has passed under the drum — that timer belongs to the robot, because only the robot knows its speed.</p>
+  </div>
+  <figure>
+    <div class="frame">
+      <svg class="d" viewBox="0 0 900 300" role="img" aria-label="Robot speed policy: STOP while vision is stale or absent, SLOW while the zone is blocked or the hold-off runs, FAST otherwise">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+          <marker id="a3f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-fail"/></marker>
+        </defs>
+
+        <circle cx="130" cy="60" r="5" class="dot"/>
+        <path d="M130 66V128" class="e" marker-end="url(#a3)"/>
+        <text x="124" y="86" text-anchor="end" class="lbl">no frame yet</text>
+        <text x="124" y="98" text-anchor="end" class="lbl">age = ∞</text>
+
+        <path d="M700 138C600 0 300 0 200 138" class="e fail" marker-end="url(#a3f)"/>
+        <text x="450" y="28" text-anchor="middle" class="lbl c-fail">age &gt; 0.5 s: vision stalled → STOP, from SLOW or FAST</text>
+
+        <path d="M425 130C425 98 475 98 475 130" class="e" marker-end="url(#a3)"/>
+        <text x="450" y="88" text-anchor="middle" class="lbl">blocked: re-arm hold = now + 0.22 m ÷ V_SLOW (≈ 1.5 s)</text>
+        <text x="450" y="100" text-anchor="middle" class="lbl">clear but hold still running: stay slow</text>
+
+        <rect x="60" y="130" width="140" height="44" rx="6" class="st failbox"/>
+        <text x="130" y="148" text-anchor="middle" class="name c-fail">STOP</text>
+        <text x="130" y="164" text-anchor="middle" class="lbl">SPEED 0</text>
+
+        <rect x="380" y="130" width="140" height="44" rx="6" class="st"/>
+        <text x="450" y="148" text-anchor="middle" class="name c-caution">SLOW</text>
+        <text x="450" y="164" text-anchor="middle" class="lbl">V_SLOW 0.15 m/s*</text>
+
+        <rect x="700" y="130" width="140" height="44" rx="6" class="st"/>
+        <text x="770" y="148" text-anchor="middle" class="name c-confirm">FAST</text>
+        <text x="770" y="164" text-anchor="middle" class="lbl">V_FAST 0.45 m/s*</text>
+
+        <path d="M200 144H378" class="e" marker-end="url(#a3)"/>
+        <text x="290" y="137" text-anchor="middle" class="lbl">frames back, blocked</text>
+        <path d="M380 160H202" class="e fail" marker-end="url(#a3f)"/>
+        <text x="290" y="173" text-anchor="middle" class="lbl">age &gt; 0.5 s</text>
+
+        <path d="M700 144H522" class="e" marker-end="url(#a3)"/>
+        <text x="611" y="137" text-anchor="middle" class="lbl">zone_blocked()</text>
+        <path d="M520 160H698" class="e" marker-end="url(#a3)"/>
+        <text x="611" y="173" text-anchor="middle" class="lbl">clear, hold expired</text>
+
+        <path d="M200 170C300 240 600 240 700 170" class="e" marker-end="url(#a3)"/>
+        <text x="450" y="238" text-anchor="middle" class="lbl">frames back, zone clear</text>
+
+        <text x="450" y="284" text-anchor="middle" class="lbl">* placeholders in robot_stub.py until M-1 sets the speeds; 0.22 m is the camera-to-drum distance, a tape measure on the built chassis</text>
+      </svg>
+    </div>
+    <figcaption><b>Stale vision is never a clear floor.</b> Before the first frame <code>age</code> is infinite, so the robot starts stopped; any later gap over 0.5 s stops it again from either driving state. The hold-off is re-armed every blocked frame, so it measures from when the object <em>left</em> the zone, not when it entered.</figcaption>
+  </figure>
+  <details>
+    <summary>Mermaid source — paste into Obsidian or GitHub</summary>
+<pre>stateDiagram-v2
+    [*] --> STOP: no frame yet, age = ∞
+    STOP --> SLOW: frames back, zone_blocked()
+    STOP --> FAST: frames back, zone clear
+    FAST --> SLOW: zone_blocked()
+    SLOW --> SLOW: blocked, re-arm hold; or clear but still holding
+    SLOW --> FAST: clear and hold expired
+    SLOW --> STOP: age &gt; 0.5 s
+    FAST --> STOP: age &gt; 0.5 s</pre>
+  </details>
+
+  <div class="refs">
+    <span>Thresholds from policy.py: CONFIRM 0.5 · CAUTION 0.25 · EMA α 0.4 · match radius 80 px · MAX_MISSES 5. Retune with policy.tune() on the real mount (PRD M-12).</span>
+    <span>Timings from RESULT.md, shipping build arg-bolts-4-n-640 at 640: 24.4 ms median inference inside the 33.3 ms sensor frame.</span>
+    <span>Field-by-field contract: docs/INTEGRATION.md §5.</span>
+  </div>
+</div>

@@ -9,7 +9,10 @@ import argparse
 from pathlib import Path
 
 from fodcv.paths import HOLDOUT_DIR
-from fodcv.research import eval as evaluation
+try:
+    from fodcv.research import eval as evaluation
+except ImportError as e:  # the robot's base install has no ultralytics, by design
+    raise SystemExit(f"{e}\nfodcv-eval needs the research extra: pip install 'fod-vision[research]'")
 
 
 def main():

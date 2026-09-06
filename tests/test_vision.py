@@ -298,3 +298,52 @@ def test_a_step_publishes_the_zone_decision(tmp_path):
 
     v._step(FakePipeline(hailo_output({1: [[0.05, 0.05, 0.2, 0.2, 0.9]]})), [])
     assert not v.zone_blocked(), "the new track is in the top-left, outside the strip"
+
+
+# --- the opt-in tier: detail() ---------------------------------------------------
+
+def test_detail_reports_the_coasting_track_that_latest_drops(tmp_path):
+    """The record is where the hidden half lives: a track on its miss budget still
+    blocks the zone but has no target. detail() shows it, with why -- misses, raw
+    beside the EMA, whether it sat in the strip -- and json.dumps() it for the log."""
+    v = vision.Vision(hef=hef_with(tmp_path / "g"), lookahead=LOWER_HALF, width=480, height=480)
+    v._picam = FakeCamera(np.zeros((480, 480, 3), dtype=np.uint8))
+    tracks = v._step(FakePipeline(hailo_output({1: [[0.55, 0.55, 0.7, 0.7, 0.9]]})), [])
+    v._step(FakePipeline(hailo_output({})), tracks)  # a frame with no detection
+
+    assert v.latest() == [] and v.zone_blocked()
+    d = json.loads(json.dumps(v.detail()))
+    (t,) = d["tracks"]
+    assert (t["cls"], t["state"], t["hits"], t["misses"], t["in_zone"]) == ("screw", "CONFIRM", 1, 1, True)
+    assert t["raw"] == pytest.approx(0.9) and t["conf"] == pytest.approx(0.9)
+    assert t["box"] == [264, 264, 336, 336]
+    assert (d["blocked"], d["frame_id"], d["error"]) == (True, 2, None)
+    assert set(d["stage_ms"]) == set(vision.STAGES)
+    assert d["top_scores"] == dict.fromkeys(CLASSES, 0.0), "nothing scored this frame"
+    assert d["camera"]["frame_size"] == [480, 480]
+
+
+def test_detail_reports_a_thread_failure_instead_of_raising(tmp_path):
+    """The caller asking for diagnostics is the one who most needs to hear it."""
+    v = vision.Vision(hef=hef_with(tmp_path / "h"))
+    v._error = RuntimeError("HailoRTStatusException")
+    assert "HailoRTStatusException" in v.detail()["error"]
+    with pytest.raises(RuntimeError):
+        v.latest()
+
+
+def test_a_vision_is_single_use(tmp_path):
+    """Re-entering an exited Vision would start a loop that stops at once and hand
+    back an object whose age grows and whose zone reads clear."""
+    v = vision.Vision(hef=hef_with(tmp_path / "i"))
+    v._stop.set()  # what __exit__ leaves behind
+    with pytest.raises(AssertionError, match="single-use"):
+        v.__enter__()
+
+
+def test_stats_are_a_window_not_a_leak(tmp_path):
+    v = vision.Vision(hef=hef_with(tmp_path / "j"))
+    for _ in range(vision.STATS_MAX + 100):
+        v.stats["total"].append(1.0)
+    assert len(v.stats["total"]) == vision.STATS_MAX
+    assert v.fps == pytest.approx(1000.0)

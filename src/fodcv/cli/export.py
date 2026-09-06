@@ -2,9 +2,13 @@
 
 import argparse
 
-from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
 from fodcv.paths import CURRENT_DATASET, CURRENT_RUN
-from fodcv.research import export
+
+try:
+    from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
+    from fodcv.research import export
+except ImportError as e:  # the robot's base install has no ultralytics, by design
+    raise SystemExit(f"{e}\nfodcv-export needs the research extra: pip install 'fod-vision[research]'")
 
 
 def main():

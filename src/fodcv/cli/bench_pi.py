@@ -2,9 +2,13 @@
 
 import argparse
 
-from fodcv.bench import pi
-from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
 from fodcv.paths import CURRENT_DATASET, CURRENT_RUN
+
+try:
+    from fodcv.bench import pi
+    from fodcv.matrix import DEFAULT_PRECISIONS, FORMATS, IMGSZ, PRECISIONS
+except ImportError as e:  # the robot's base install has no ultralytics, by design
+    raise SystemExit(f"{e}\nfodcv-bench needs the research and bench extras: pip install 'fod-vision[research,bench]'")
 
 
 def main():

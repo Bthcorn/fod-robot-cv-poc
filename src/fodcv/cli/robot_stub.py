@@ -17,12 +17,18 @@ Wave a screw through the lower half of the frame. What you are checking, in orde
 No motors, no serial. Replace the two prints with writes to the ESP32 and this is
 PRD FR-4: `SPEED <v>` on the line protocol in PRD 5.
 
+Every speed change also prints `vision.detail()` -- the opt-in record: coasting
+tracks, the raw score under the EMA, which track sat in the strip, the frame's
+timings. That is the shape of what your logger will write; nothing in the loop
+needs it, which is the point of it being a separate call.
+
 The hold-off timer lives here, not in Vision. Its length is the camera-to-drum
 distance over the current speed, and the CV package does not know the speed --
 which is the whole reason the split falls here. See docs/INTEGRATION.md.
 """
 
 import argparse
+import json
 import time
 
 from fodcv import paths
@@ -81,9 +87,8 @@ def main():
             speed = V_SLOW if now < hold_until else V_FAST
 
             if speed != commanded:  # only the edges; steady state is not news
-                print(f"SPEED {speed:.2f}"
-                      + "".join(f"\n    #{t.id:<3} {t.cls:<8} {t.conf:.2f} {t.state:<7} {t.action}"
-                                for t in vision.latest()))
+                # The default tier decided the speed above; the opt-in tier says why.
+                print(f"SPEED {speed:.2f}\n    {json.dumps(vision.detail())}")
                 commanded = speed
             time.sleep(1 / args.hz)
 

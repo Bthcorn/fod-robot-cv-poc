@@ -3,6 +3,10 @@ name = "fod-vision"
 version = "0.2.0"
 description = "FOD robot vision: dataset prep, fine-tuning, runtime export, on-device benchmarking, and the runtime the robot imports"
 readme = "README.md"
+# AGPL because research/ links Ultralytics (AGPL-3.0) and ships in the same wheel;
+# runtime/ imports neither, but one distribution carries one licence.
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 # 3.11, not 3.12: the Pi runs fodcv.runtime on its *system* interpreter, which
 # Bookworm pins at 3.11 because apt's picamera2 is built against it.
 requires-python = ">=3.11"
