@@ -25,6 +25,11 @@ git diff --quiet && git diff --cached --quiet || { echo "working tree is dirty -
 BRANCH=$(git branch --show-current)
 [ "$BRANCH" = main ] || [ "${RELEASE_BRANCH_OK:-}" = 1 ] || {
   echo "on $BRANCH, not main -- merge first, or RELEASE_BRANCH_OK=1 to tag here anyway"; exit 1; }
+# A PR merged on GitHub puts commits on origin that this checkout lacks, and the
+# push below is then rejected. Find out now, before the version bump.
+git fetch -q origin
+git merge-base --is-ancestor "origin/$BRANCH" HEAD || {
+  echo "origin/$BRANCH has commits you do not -- git pull first"; exit 1; }
 
 uv version "$V"
 uv run pytest -q
@@ -56,6 +61,7 @@ rm -rf "$TMP"
 
 git commit -am "release: v$V"
 git tag -a "v$V" -m "v$V"
-git push origin HEAD "v$V"
+git push origin HEAD   # the branch alone first: a rejected push must abort before the tag is public
+git push origin "v$V"
 gh release create "v$V" "$WHL" "$BUNDLE" dist/SHA256SUMS --title "v$V" \
   ${NOTES:+--notes-file "$NOTES"} ${NOTES:---generate-notes}
