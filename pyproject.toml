@@ -1,6 +1,6 @@
 [project]
 name = "fod-vision"
-version = "0.2.0"
+version = "0.3.0"
 description = "FOD robot vision: dataset prep, fine-tuning, runtime export, on-device benchmarking, and the runtime the robot imports"
 readme = "README.md"
 # AGPL because research/ links Ultralytics (AGPL-3.0) and ships in the same wheel;
