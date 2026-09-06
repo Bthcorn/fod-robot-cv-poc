@@ -54,8 +54,9 @@ BUNDLES=(
 ASSETS=("$WHL")
 for spec in "${BUNDLES[@]}"; do
   name=${spec%%=*}; hef=${spec#*=}; bundle=dist/$name.tar.gz
-  # COPYFILE_DISABLE: no ._* AppleDouble entries for the Pi to trip over.
-  COPYFILE_DISABLE=1 tar czf "$bundle" "$(dirname "$(dirname "$hef")")/run.json" "$(dirname "$hef")"
+  # COPYFILE_DISABLE + --no-xattrs: no ._* AppleDouble entries and no
+  # LIBARCHIVE.xattr headers; GNU tar on the Pi warns on the latter for every file.
+  COPYFILE_DISABLE=1 tar --no-xattrs -czf "$bundle" "$(dirname "$(dirname "$hef")")/run.json" "$(dirname "$hef")"
   # The gate. Clean 3.11, no project: just the wheel and what it declares, loading
   # the *extracted* bundle. Fails if the layout, the metadata or the base deps are wrong.
   TMP=$(mktemp -d)
