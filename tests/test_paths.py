@@ -1,3 +1,4 @@
+from pathlib import Path
 from fodcv import paths
 
 
@@ -28,3 +29,15 @@ def test_calibration_yaml_sits_with_its_dataset(monkeypatch, tmp_path):
     where the train images are. Both yamls omit path:, so location decides."""
     monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
     assert paths.calib_yaml_path("fod-a").parent == paths.dataset_dir("fod-a")
+
+
+def test_the_deploy_hef_is_relative_and_two_below_its_run():
+    """class_names() reads <hef>/../../run.json and release.sh tars exactly that
+    pair, so both lean on this shape. Relative on purpose: the robot pip-installs
+    the package, so anything built from ROOT points into site-packages -- and
+    release.sh's gate would still pass on the Mac, because an absolute path
+    resolves against its real artifacts/ instead of the extracted bundle."""
+    hef = paths.DEPLOY_HEF
+    assert not hef.is_absolute()
+    assert hef.parent.parent == Path("artifacts") / paths.DEPLOY_RUN
+    assert hef.name == "best.hef"

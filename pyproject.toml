@@ -13,11 +13,14 @@ requires-python = ">=3.11"
 
 # What `fodcv.runtime` needs, and nothing else. The robot repo installs this into
 # the Pi's system python3.11 and must not get torch with it -- ultralytics lives in
-# the `research` extra for exactly that reason. Both are already present on the Pi
-# via apt's python3-opencv/python3-numpy, so this install adds almost nothing.
+# the `research` extra for exactly that reason. The floors are the Pi's apt versions
+# (python3-numpy 1.24.2, python3-opencv 4.6.0), which is what every number in
+# RESULT.md was measured with; the Pi installs `--no-deps` so pip cannot stack PyPI
+# copies on top of them under picamera2 and hailo_platform. The Mac lock resolves
+# whatever is newest.
 dependencies = [
-    "numpy>=1.26",
-    "opencv-python>=5.0.0.93",
+    "numpy>=1.24",
+    "opencv-python>=4.6",
 ]
 
 [project.optional-dependencies]

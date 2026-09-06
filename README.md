@@ -39,7 +39,13 @@ The Mac-only converters (`nncf`, `pnnx`, `onnxslim`) are in the `export` extra b
 uv run pytest
 ```
 
-Covers the pure logic only — the matrix, the manifest, path/run/dataset resolution, the dataset registry and its validation, the tracker and its hysteresis, the VOC→YOLO box maths, the split determinism, the run/dataset class guard, the camera geometry helpers, and the PMIC parser. No hardware, no model loads, ~2 s on either machine.
+Covers the pure logic only — the matrix, the manifest, path/run/dataset resolution, the dataset registry and its validation, the tracker and its hysteresis, the VOC→YOLO box maths, the split determinism, the run/dataset class guard, the camera geometry helpers, and the PMIC parser — plus the robot-side install contract, run in a subprocess with the
+research stack blocked. No hardware, no model loads, ~15 s.
+
+The robot-side subset also runs in GitHub Actions on every PR and push to `main`
+(`.github/workflows/test.yml`): base dependencies only, then the built wheel imported on
+Python 3.11, the Pi's interpreter. The research files skip themselves there via
+`tests/conftest.py`.
 
 Run order:
 
@@ -159,13 +165,15 @@ Install it into the Pi's **system** interpreter, which is where picamera2 and
 `hailo_platform` live, from the wheel on the release:
 
 ```
-sudo python3.11 -m pip install --break-system-packages \
+sudo python3.11 -m pip install --break-system-packages --no-deps \
   https://github.com/Bthcorn/fod-robot-cv-poc/releases/download/v0.3.0/fod_vision-0.3.0-py3-none-any.whl
 ```
 
 That is why base dependencies are `numpy` + `opencv-python` only and `requires-python` is
-`>=3.11`. Both are already on the Pi via apt's `python3-picamera2`, so the install adds
-effectively nothing — and no torch. Nothing under `runtime/` imports `ultralytics` or
+`>=3.11`. Both are already on the Pi via apt, which is what `--no-deps` protects: pip does
+not recognise apt's cv2 as `opencv-python` and would stack a PyPI OpenCV and a newer numpy
+on top of the ones every number was measured with. With the flag the install is the wheel
+alone — and no torch. Nothing under `runtime/` imports `ultralytics` or
 `yaml`; `fodcv/cli/camera_hailo.py` imports `Vision` like any other consumer, which is what
 keeps the interface exercised by the tool that produced every number in `RESULT.md`.
 
@@ -188,6 +196,10 @@ pushes and creates the GitHub release. Bundle layout and the Pi-side install are
 [`docs/INTEGRATION.md`](docs/INTEGRATION.md) §1–§2 — the one place they are written down.
 GitHub Packages has no PyPI registry, so a Release asset is the publish target; `uv publish`
 would only be needed for PyPI, which nothing here consumes.
+
+Then on the board: `bash scripts/pi-smoke.sh v0.3.0` — installs from the release and asserts
+the contract, the timing floor and a clean `detail()` record. Paste its last lines into the
+release notes; it is the only check that sees HailoRT and the camera.
 
 **Not `bench_int8_hailo_model/`.** That directory in this run holds the conf 0.001
 build, which scores 0.0000 mAP50 -- RESULT.md §13. `DEPLOY_HEF` names the 0.0001

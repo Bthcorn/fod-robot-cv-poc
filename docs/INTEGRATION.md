@@ -19,7 +19,7 @@ change, and the two are never pinned apart.
 Into the Pi's **system** interpreter, not a venv, from the wheel on the release:
 
 ```bash
-sudo python3.11 -m pip install --break-system-packages \
+sudo python3.11 -m pip install --break-system-packages --no-deps \
   https://github.com/Bthcorn/fod-robot-cv-poc/releases/download/v0.3.0/fod_vision-0.3.0-py3-none-any.whl
 ```
 
@@ -36,13 +36,16 @@ The board needs these from apt (Raspberry Pi OS Bookworm) before that line:
 | `hailo-all` | HailoRT, the `hailo_platform` bindings, the PCIe driver |
 
 The wheel declares `numpy` and `opencv-python` and nothing else — no torch, no
-ultralytics. Check once that pip did not compile OpenCV: `pip show opencv-python`
-should name a wheel and the install should take seconds. If it built from source,
-reinstall with `--no-deps` and let apt's cv2 serve.
+ultralytics. **`--no-deps` is not optional.** apt's `python3-numpy` (1.24.2) and
+`python3-opencv` (4.6.0) are what every number in RESULT.md was measured with, and
+pip does not recognise apt's cv2 as `opencv-python`: without the flag it downloads
+a PyPI OpenCV and a newer numpy into system python, underneath picamera2 and
+`hailo_platform`. With the flag the install is the ~90 KB wheel and nothing else.
 
-Record `hailortcli --version` next to the release you install. The `.hef` was
-compiled with Dataflow Compiler 3.34.0 and HailoRT must be the matching line; a
-mismatch fails at `Vision.__enter__`, not at import.
+The board these numbers come from: Raspberry Pi OS Bookworm, Python 3.11.2,
+HailoRT 4.20.0, `.hef` compiled with Dataflow Compiler 3.34.0. A different HailoRT
+line fails at `Vision.__enter__`, not at import — `hailortcli --version` says which
+you have.
 
 Nine `fodcv-*` commands land on `PATH`. Two run here: `fodcv-hailo-camera` and
 `fodcv-robot-stub`. The other seven are the Mac-side pipeline; on this board they
@@ -108,6 +111,18 @@ does the chip see anything" while there is still no control loop to blame.
 `--preview` needs `DISPLAY=:0`. The stub prints the opt-in record (§5.2) at every
 speed change, so you have seen the shape of what you will log before you write the
 logger.
+
+[`scripts/pi-smoke.sh`](../scripts/pi-smoke.sh) is those steps with assertions —
+install from the release, checksums, the base-install contract, the stub's lines,
+a `detail()` record with no error, and the timing floor:
+
+```bash
+bash scripts/pi-smoke.sh v0.3.0
+```
+
+Run it on every release before touching robot code, and paste its last lines into
+the release notes. It cannot see whether the model detects anything — that needs an
+object in view and `--preview`.
 
 ## 4. The loop
 

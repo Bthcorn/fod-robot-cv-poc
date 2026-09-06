@@ -1,0 +1,26 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The robot's install, not the Mac's: base deps + pytest, no research extra (torch
+# is gigabytes of CUDA wheels on ubuntu). tests/conftest.py skips the research
+# files when ultralytics is absent. The wheel gate then imports the two Pi
+# commands on the Pi's own interpreter, 3.11 -- the dev venv is 3.12 and never
+# sees a 3.12-only construct.
+jobs:
+  robot-side:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.10.8"
+          enable-cache: true
+      - run: sudo apt-get install -y libgl1   # opencv-python links libGL
+      - run: uv sync --locked
+      - run: uv run pytest -q
+      - run: uv build --wheel
+      - run: uv run --isolated --no-project --python 3.11 --with dist/*.whl -- python -c "import fodcv.cli.camera_hailo, fodcv.cli.robot_stub"
