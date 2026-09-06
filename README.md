@@ -181,8 +181,9 @@ NOTES=artifacts/arg-bolts-4-n-640/SHIPPING_640_conf0001_2026-09-06/README.txt \
 ```
 
 The script bumps the version, runs the tests, builds the wheel, tars whatever
-`paths.DEPLOY_HEF` points at (so the bundle cannot drift from the code), proves the
-extracted bundle loads through the wheel in a clean Python 3.11, and only then tags,
+`paths.DEPLOY_HEF` points at (so the bundle cannot drift from the code) plus the
+alternates in the script's `BUNDLES` list, proves each extracted bundle loads through
+the wheel in a clean Python 3.11, and only then tags,
 pushes and creates the GitHub release. Bundle layout and the Pi-side install are in
 [`docs/INTEGRATION.md`](docs/INTEGRATION.md) §1–§2 — the one place they are written down.
 GitHub Packages has no PyPI registry, so a Release asset is the publish target; `uv publish`

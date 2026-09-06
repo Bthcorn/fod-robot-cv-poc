@@ -81,6 +81,17 @@ deeper or shallower will not load. The default path, `fodcv.paths.DEPLOY_HEF`, i
 relative to the working directory — run the robot from the directory you untarred
 into, or pass an absolute `hef=`; the neighbour rule still applies.
 
+**Two alternates ship on the same tag**, for when the default does not suit
+(RESULT.md, "Alternates"). Same four classes, same layout; the 480 one unpacks
+beside the default inside the same run directory. `DEPLOY_HEF` only knows the
+default — pass `Vision(hef=…)` or `--hef` for the others.
+
+| bundle | input | mAP50 | median | pick it when |
+|---|---:|---:|---:|---|
+| `arg-bolts-4-n-640.tar.gz` | 640 | 0.7715 | 24.4 ms | default |
+| `arg-bolts-4-n-640-at480.tar.gz` | 480 | 0.7159 | 16.6 ms | the control loop needs the other 8 ms |
+| `arg-bolts-4-s-640-a16.tar.gz` | 640 | 0.6549 | 50.2 ms | misses the 33 ms frame; only if ~20 FPS is acceptable |
+
 `hailortcli parse-hef best.hef` confirms the architecture, class count and score
 threshold on the board. That threshold is 0.0001 and it is a compiled **floor**, not
 a filter: filter host-side with `conf=` (default 0.25).
