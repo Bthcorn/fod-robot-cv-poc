@@ -51,6 +51,7 @@ from build_slides import (
     H,
     INK,
     M,
+    MONO,
     MUTED,
     ROOT,
     W,
@@ -87,6 +88,18 @@ def bullets(slide, left, top, width, items, step=0.75, size=15):
         txt(slide, left, top + Inches(i * step), width, Inches(step - 0.05),
             [(lead, {"bold": True, "color": INK}), (rest, {"color": MUTED, "size": size - 1})],
             size=size, space_after=0, line=1.2)
+    return top + Inches(len(items) * step)
+
+
+def calls(slide, left, top, width, items, step=0.55, size=14):
+    """Like bullets(), but the lead is set in the code font. These are the
+    literal names the robot's program calls -- looking like code is the point,
+    so whoever is integrating can find them in the handoff document by eye."""
+    for i, (lead, rest) in enumerate(items):
+        txt(slide, left, top + Inches(i * step), width, Inches(step - 0.03),
+            [(lead, {"bold": True, "color": ACCENT, "font": MONO, "size": size}),
+             (rest, {"color": MUTED, "size": size - 1})],
+            size=size, space_after=0, line=1.1)
     return top + Inches(len(items) * step)
 
 
@@ -133,11 +146,11 @@ def slide_training(prs):
 
 
 def slide_software(prs):
-    """2. What shipped, and the interface it exposes."""
+    """2. What shipped, and the functions the robot's program calls to use it."""
     s, y = slide_base(prs, KICKER, "The released software",
-                      "Version 0.3.0 - installed on the robot, with a simple interface")
+                      "Version 0.3.0 - one class to import, and five calls to know")
 
-    bullets(s, M, y + Inches(0.05), BODY_W, step=0.62, items=[
+    bullets(s, M, y + Inches(0.02), BODY_W, step=0.5, items=[
         ("Published on GitHub and installed on the robot. ",
          "Two commands install a 90 KB software package and a 4.5 MB trained model, "
          "both checksummed so a download can be verified."),
@@ -145,26 +158,37 @@ def slide_software(prs):
          "The software records which model it expects, so it always runs the right one."),
     ])
 
-    band_top = y + Inches(1.55)
-    band(s, M, band_top, BODY_W, Inches(1.05))
-    txt(s, M + Inches(0.3), band_top + Inches(0.26), BODY_W - Inches(0.6), Inches(0.5),
-        "Every frame it answers one question: is there confirmed debris in the strip "
-        "of floor we are about to drive over?",
-        size=17, bold=True, color=INK, align=PP_ALIGN.CENTER, line=1.15)
+    txt(s, M, y + Inches(1.14), BODY_W, Inches(0.3),
+        "WHAT THE ROBOT'S PROGRAM CALLS", size=12, bold=True, color=ACCENT)
 
-    bullets(s, M, band_top + Inches(1.25), BODY_W, step=0.62, items=[
-        ("That answer drives the speed rule. ",
-         "Slow down when it is yes, full speed when it is no (FR-4)."),
-        ("More detail is available on request. ",
-         "Each object's identity, confidence and timings, off the control path so the "
-         "loop stays cheap."),
-        ("Ships ready to hand over. ",
-         "A written integration document and a one-command self-test for a fresh robot."),
+    calls(s, M, y + Inches(1.52), BODY_W, step=0.52, items=[
+        ("Vision(hef=...)  ",
+         "opens the camera and the accelerator. Called once, at start-up."),
+        (".zone_blocked()  ",
+         "yes or no - confirmed debris in the strip of floor ahead. Drives the speed "
+         "rule: slow when yes, full speed when no (FR-4)."),
+        (".age  ",
+         "seconds since the last result. Watched so a stalled camera is never read as a "
+         "clear floor."),
+        (".latest()  ",
+         "every object seen this frame - identity, confidence, position. For logging "
+         "or drawing, not for the speed decision."),
+        (".detail()  ",
+         "the full record, on request: everything above plus timing and camera state. "
+         "Off the control path, so the loop stays cheap."),
     ])
-    notes(s, "The class is Vision; the per-frame call is zone_blocked(). Detail comes from "
-             "latest() and detail(). Deliberately no serial, no metres, no steering: "
-             "collection is passive, so a boolean is the whole control input. Installed and "
-             "verified on the Pi 5 with camera and accelerator on 6 September.")
+
+    txt(s, M, H - Inches(1.02), BODY_W, Inches(0.4),
+        "It reports. It does not drive, steer, or talk to the motor controller - "
+        "those calls stay with the robot team.",
+        size=13, color=MUTED)
+    notes(s, "The class is fodcv.runtime.vision.Vision, used as a context manager (a with "
+             "block) so the camera and accelerator are always released. zone_blocked() and "
+             "age are what the control loop reads every poll; latest() and detail() are "
+             "opt-in and do not change what the loop computes. Deliberately no serial, no "
+             "metres, no steering: collection is passive, so a boolean is the whole control "
+             "input. Installed and verified on the Pi 5 with camera and accelerator on "
+             "6 September.")
 
 
 def slide_measured(prs):
