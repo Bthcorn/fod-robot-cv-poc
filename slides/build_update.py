@@ -77,6 +77,10 @@ LIVE_FPS = "30"            # live session on the board, end to end
 LIVE_FRAMES = "3,294"      # runs/camera_hailo/timings.csv
 DATASET_IMAGES = "12,678"  # RESULT.md SS13: trained at 640 on 12,678 images
 TRAIN_TIME = "about an hour"  # docs/autorun-argbolts.md: 1,514 s + 2,114 s for the pair
+FPS_640 = "40.9"           # RESULT.md Current build, stated directly
+FPS_480 = "60.2"           # derived, 1000 / 16.6 ms; RESULT.md gives only the ms figure
+WEIGHTS_N_MB = "5.5"       # artifacts/arg-bolts-4-n-640/best.pt, 5,474,778 B on disk
+WEIGHTS_S_MB = "19.2"      # artifacts/arg-bolts-4-s-640/best.pt, 19,181,146 B on disk
 
 
 def bullets(slide, left, top, width, items, step=0.75, size=15):
@@ -117,11 +121,11 @@ def slide_training(prs):
     s, y = slide_base(prs, KICKER, "Trained on a new dataset",
                       "A public fastener dataset, compared across model configurations")
 
-    table(s, [["Model configuration", "Accuracy (0-1)", "Time/frame"],
-              ["Native resolution, 640 px", ACCURACY, LATENCY_MS + " ms"],
-              ["Faster resolution, 480 px", ACCURACY_480, LATENCY_480 + " ms"]],
+    table(s, [["Configuration", "Accuracy (0-1)", "Time/frame", "Frames/sec"],
+              ["YOLO11n, 640 px (native)", ACCURACY, LATENCY_MS + " ms", FPS_640],
+              ["YOLO11n, 480 px (faster)", ACCURACY_480, LATENCY_480 + " ms", FPS_480]],
           M, y + Inches(0.1), Inches(6.5),
-          [Inches(3.1), Inches(1.7), Inches(1.7)], size=13, highlight=1)
+          [Inches(2.85), Inches(1.2), Inches(1.2), Inches(1.25)], size=13, highlight=1)
 
     bullets(s, Inches(7.6), y + Inches(0.05), Inches(5.0), step=0.95, items=[
         ("A new public dataset. ", "Four fastener classes: bolt, nut, screw, washer."),
@@ -131,9 +135,11 @@ def slide_training(prs):
     ])
 
     txt(s, M, H - Inches(1.35), BODY_W, Inches(0.65),
-        [(f"Both trained in {TRAIN_TIME} on a cloud GPU.", {"color": INK}),
-         ("A larger backbone was also evaluated and kept in reserve - the smaller one "
-          "comfortably meets the camera's real-time budget, so it shipped.",
+        [(f"Both trained in {TRAIN_TIME} on a cloud GPU, same backbone at two resolutions.",
+          {"color": INK}),
+         (f"A larger backbone, YOLO11s ({WEIGHTS_S_MB} MB against {WEIGHTS_N_MB} MB), was "
+          "also evaluated at 640 px and kept in reserve - the smaller one comfortably meets "
+          "the camera's real-time budget, so it shipped.",
           {"color": MUTED, "size": 13})],
         size=14, space_after=3, line=1.15)
     notes(s, "Dataset: a public Roboflow fastener export (ARG_Bolts_FV), registered as "
@@ -142,7 +148,9 @@ def slide_training(prs):
              "resolutions) and yolo11s (evaluated, not shipped -- at 640 it does not fit the "
              "33 ms frame). Trained on a rented GPU, 60 passes each (epochs), batch 16, "
              "early stopping disabled, identical settings across runs "
-             "(scripts/train_roboflow.sh). About 1,514 s + 2,114 s for the pair.")
+             "(scripts/train_roboflow.sh). About 1,514 s + 2,114 s for the pair. "
+             "Frames/sec for the 480 row is derived from its median latency; RESULT.md "
+             "states only the millisecond figure for that row.")
 
 
 def slide_software(prs):
