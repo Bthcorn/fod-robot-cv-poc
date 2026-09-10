@@ -3,29 +3,41 @@
 
     uv run --with python-pptx python slides/build_update.py
 
-Four slides on what the publish delivered. Separate from build_slides.py, which
-is the full results deck; this one is the short update and stands alone. Styling
-and helpers are imported from it so the two look like the same hand.
+Four slides, in the order the work happened: what was trained, what shipped and
+the interface it exposes, what it measures, then what is next. Separate from
+build_slides.py, which is the full results deck; this one is the short update
+and stands alone. Styling and helpers are imported from it so the two look like
+the same hand.
 
 Three rules this deck follows, and they are why it reads the way it does:
 
-  - CURRENT STATE ONLY. What is true now. No before-and-after, no recap of the
-    previous model line, no history of decisions already taken.
-  - NO FAILED BUILDS. What was delivered and what it measures, not the debugging
-    that got there.
-  - EVERY REFERENCE EXPLAINS ITSELF, and only where it earns a place. Plain words
-    first, requirement tag in brackets after -- the supervisor does not have the
-    PRD open. Same for jargon: mAP50 and INT8 get a gloss the first time. No code
-    identifiers, no file paths, no commands on a slide.
+  - CURRENT STATE ONLY. What is true now, and what was actually done this
+    cycle -- training a new dataset and comparing model configurations is
+    exactly that. No recap of the previous model line, no re-litigating
+    decisions already taken.
+  - NO FAILED BUILDS. What was delivered and what it measures, not the
+    debugging that got there. A slower configuration that was evaluated and
+    set aside is a trade-off, not a failure, and gets a sentence, not a table
+    row with numbers that read as a shortfall.
+  - EVERY REFERENCE EXPLAINS ITSELF, and only where it earns a place. Plain
+    words first, requirement tag in brackets after -- the supervisor does not
+    have the PRD open. Same for jargon: mAP50 and INT8 get a gloss the first
+    time. No code identifiers, no file paths, no commands on a slide.
 
-Figures come from RESULT.md's "Current build" block and from the live session on
-the board (runs/camera_hailo/timings.csv, 3,294 frames), with the section named in
-a comment beside each. RESULT.md 11 forbids several numbers -- notably the
-training set's own validation score and any Mac latency -- and none appear here.
+Figures come from RESULT.md's "Current build" and "Alternates" blocks, from
+the training scripts and session docs for the training methodology, and from
+the live session on the board (runs/camera_hailo/timings.csv, 3,294 frames),
+with the source named in a comment beside each. RESULT.md 11 forbids several
+numbers -- notably the training set's own validation score and any Mac
+latency -- and none appear here.
+
+arg-bolts-4 is a public dataset (Roboflow), not the self-collected arena set
+slide 4 names as the open next step. Slide 1 says "a new public dataset" on
+purpose, so the two slides do not contradict each other.
 
 The photo is committed at slides/img/, not read from runs/: build_slides.py
-breaks today because an image it points at was deleted, and this deck should not
-inherit that.
+breaks today because an image it points at was deleted, and this deck should
+not inherit that.
 """
 
 from pptx import Presentation
@@ -51,15 +63,19 @@ from build_slides import (
 OUT = ROOT / "slides" / "fod-cv-update-v0.3.0.pptx"
 PHOTO = ROOT / "slides" / "img" / "detect_argbolts_640.jpg"
 
-KICKER = "FOD ROBOT | COMPUTER VISION | UPDATE 6 SEPTEMBER 2026"
+KICKER = "FOD ROBOT | COMPUTER VISION | UPDATE 10 SEPTEMBER 2026"
 
 # --- figures, each with where it comes from --------------------------------
-ACCURACY = "0.7715"    # RESULT.md, Current build: 200 images, own eval split
-RETAINED = "99.3%"     # same, against the full-precision model's 0.7769
-LATENCY_MS = "24.4"    # same, median; p95 25.9
-FRAME_MS = "33"        # the camera's own cadence at 1280x720
-LIVE_FPS = "30"        # live session on the board, end to end
-LIVE_FRAMES = "3,294"  # runs/camera_hailo/timings.csv
+ACCURACY = "0.7715"        # RESULT.md SS13 Alternates: native 640, shipped, own eval split
+LATENCY_MS = "24.4"        # same, median; p95 25.9
+ACCURACY_480 = "0.7159"    # same table: same backbone, 480 resolution
+LATENCY_480 = "16.6"       # same
+RETAINED = "99.3%"         # RESULT.md Current build: against the full-precision model's 0.7769
+FRAME_MS = "33"            # the camera's own cadence at 1280x720
+LIVE_FPS = "30"            # live session on the board, end to end
+LIVE_FRAMES = "3,294"      # runs/camera_hailo/timings.csv
+DATASET_IMAGES = "12,678"  # RESULT.md SS13: trained at 640 on 12,678 images
+TRAIN_TIME = "about an hour"  # docs/autorun-argbolts.md: 1,514 s + 2,114 s for the pair
 
 
 def bullets(slide, left, top, width, items, step=0.75, size=15):
@@ -83,60 +99,72 @@ def band(slide, left, top, width, height, colour=BAND):
     return shape
 
 
-def slide_released(prs):
-    """1. What exists now: a released, installable component."""
-    s, y = slide_base(prs, KICKER, "The vision system is released",
-                      "Version 0.3.0, published on GitHub and installed on the robot")
+def slide_training(prs):
+    """1. What was trained: a new dataset, and a comparison of model configurations."""
+    s, y = slide_base(prs, KICKER, "Trained on a new dataset",
+                      "A public fastener dataset, compared across model configurations")
 
-    table(s, [["What is in the release", "Size", "Purpose"],
-              ["Software package", "90 KB", "what the robot's program imports"],
-              ["Trained model", "4.5 MB", "what runs on the accelerator"],
-              ["Checksums", "-", "verify a download is intact"]],
+    table(s, [["Model configuration", "Accuracy (0-1)", "Time/frame"],
+              ["Native resolution, 640 px", ACCURACY, LATENCY_MS + " ms"],
+              ["Faster resolution, 480 px", ACCURACY_480, LATENCY_480 + " ms"]],
           M, y + Inches(0.1), Inches(6.5),
-          [Inches(2.5), Inches(1.1), Inches(2.9)], size=13)
+          [Inches(3.1), Inches(1.7), Inches(1.7)], size=13, highlight=1)
 
     bullets(s, Inches(7.6), y + Inches(0.05), Inches(5.0), step=0.95, items=[
-        ("Two commands to install. ", "Nothing else is needed on the robot."),
-        ("No training software on the robot. ", "The heavy machine-learning stack stays on the development machine."),
-        ("The version is pinned. ", "The software records which model it expects, so which model is on the robot always has an answer."),
-        ("Verified on the hardware. ", "Installed and run on the Raspberry Pi 5 with the camera and accelerator."),
+        ("A new public dataset. ", "Four fastener classes: bolt, nut, screw, washer."),
+        (DATASET_IMAGES + " training images. ", "Already labelled, imported and validated."),
+        ("Same process for every model. ",
+         "60 passes through the dataset, identical settings, so the comparison is fair."),
     ])
 
-    txt(s, M, H - Inches(1.35), BODY_W, Inches(0.5),
-        "The robot team installs it from the release. They do not need this project's "
-        "code, its datasets, or its training tools.",
-        size=14, color=MUTED)
-    notes(s, "v0.3.0 on GitHub carries the wheel, three model bundles and SHA256SUMS. "
-             "Install is a single pip line plus a download-and-extract. Verified end to end "
-             "on the board on 6 September with a scripted smoke test.")
+    txt(s, M, H - Inches(1.35), BODY_W, Inches(0.65),
+        [(f"Both trained in {TRAIN_TIME} on a cloud GPU.", {"color": INK}),
+         ("A larger backbone was also evaluated and kept in reserve - the smaller one "
+          "comfortably meets the camera's real-time budget, so it shipped.",
+          {"color": MUTED, "size": 13})],
+        size=14, space_after=3, line=1.15)
+    notes(s, "Dataset: a public Roboflow fastener export (ARG_Bolts_FV), registered as "
+             "arg-bolts-4 -- a different dataset from the self-collected arena set on slide "
+             "4. 12,678 images at 640. Backbones compared: yolo11n (shipped, both "
+             "resolutions) and yolo11s (evaluated, not shipped -- at 640 it does not fit the "
+             "33 ms frame). Trained on a rented GPU, 60 passes each (epochs), batch 16, "
+             "early stopping disabled, identical settings across runs "
+             "(scripts/train_roboflow.sh). About 1,514 s + 2,114 s for the pair.")
 
 
-def slide_interface(prs):
-    """2. What the teammate integrates against."""
-    s, y = slide_base(prs, KICKER, "What the robot team receives",
-                      "One class to import, and one question answered every frame")
+def slide_software(prs):
+    """2. What shipped, and the interface it exposes."""
+    s, y = slide_base(prs, KICKER, "The released software",
+                      "Version 0.3.0 - installed on the robot, with a simple interface")
 
-    band(s, M, y + Inches(0.05), BODY_W, Inches(1.15))
-    txt(s, M + Inches(0.3), y + Inches(0.42), BODY_W - Inches(0.6), Inches(0.5),
-        "Is there confirmed debris in the strip of floor we are about to drive over?",
-        size=20, bold=True, color=INK, align=PP_ALIGN.CENTER)
+    bullets(s, M, y + Inches(0.05), BODY_W, step=0.62, items=[
+        ("Published on GitHub and installed on the robot. ",
+         "Two commands install a 90 KB software package and a 4.5 MB trained model, "
+         "both checksummed so a download can be verified."),
+        ("The version is pinned. ",
+         "The software records which model it expects, so it always runs the right one."),
+    ])
 
-    bullets(s, M, y + Inches(1.5), BODY_W, step=0.72, items=[
+    band_top = y + Inches(1.55)
+    band(s, M, band_top, BODY_W, Inches(1.05))
+    txt(s, M + Inches(0.3), band_top + Inches(0.26), BODY_W - Inches(0.6), Inches(0.5),
+        "Every frame it answers one question: is there confirmed debris in the strip "
+        "of floor we are about to drive over?",
+        size=17, bold=True, color=INK, align=PP_ALIGN.CENTER, line=1.15)
+
+    bullets(s, M, band_top + Inches(1.25), BODY_W, step=0.62, items=[
         ("That answer drives the speed rule. ",
-         "Slow down when it is yes, full speed when it is no - the behaviour the requirements ask for (FR-4)."),
-        ("Detail is there when wanted, and out of the way when not. ",
-         "Each object's identity, confidence and timings are available on request, off the control path, so the loop stays cheap."),
-        ("It ships ready to hand over. ",
-         "A written integration document, and a single command that checks a fresh robot end to end."),
+         "Slow down when it is yes, full speed when it is no (FR-4)."),
+        ("More detail is available on request. ",
+         "Each object's identity, confidence and timings, off the control path so the "
+         "loop stays cheap."),
+        ("Ships ready to hand over. ",
+         "A written integration document and a one-command self-test for a fresh robot."),
     ])
-
-    txt(s, M, H - Inches(1.35), BODY_W, Inches(0.5),
-        "The vision system reports. It does not drive, steer, or talk to the motor "
-        "controller - those stay with the robot team.",
-        size=14, color=MUTED)
     notes(s, "The class is Vision; the per-frame call is zone_blocked(). Detail comes from "
              "latest() and detail(). Deliberately no serial, no metres, no steering: "
-             "collection is passive, so a boolean is the whole control input.")
+             "collection is passive, so a boolean is the whole control input. Installed and "
+             "verified on the Pi 5 with camera and accelerator on 6 September.")
 
 
 def slide_measured(prs):
@@ -218,8 +246,8 @@ def slide_next(prs):
 def build():
     prs = Presentation()
     prs.slide_width, prs.slide_height = W, H
-    slide_released(prs)
-    slide_interface(prs)
+    slide_training(prs)
+    slide_software(prs)
     slide_measured(prs)
     slide_next(prs)
 
