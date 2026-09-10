@@ -182,7 +182,7 @@ def slide_software(prs):
 
 def slide_measured(prs):
     """3. The numbers, measured on the board."""
-    s, y = slide_base(prs, KICKER, "Measured on the robot",
+    s, y = slide_base(prs, KICKER, "Measured on the Pi 5",
                       "Bolt, nut, screw and washer, at 640 pixels on the accelerator")
 
     table(s, [["Measurement", "Result"],
@@ -197,7 +197,7 @@ def slide_measured(prs):
 
     s.shapes.add_picture(str(PHOTO), Inches(7.25), y + Inches(0.05), width=Inches(5.0))
     txt(s, Inches(7.25), y + Inches(2.95), Inches(5.0), Inches(0.4),
-        "A frame from the live session on the robot.",
+        "A frame from a manual test run on the Pi 5.",
         size=12, color=MUTED)
 
     txt(s, M, H - Inches(1.1), BODY_W, Inches(0.5),
