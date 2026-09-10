@@ -127,20 +127,17 @@ def slide_training(prs):
           M, y + Inches(0.1), Inches(6.5),
           [Inches(2.85), Inches(1.2), Inches(1.2), Inches(1.25)], size=13, highlight=1)
 
-    bullets(s, Inches(7.6), y + Inches(0.05), Inches(5.0), step=0.95, items=[
-        ("A new public dataset. ", "Four fastener classes: bolt, nut, screw, washer."),
-        (DATASET_IMAGES + " training images. ", "Already labelled, imported and validated."),
-        ("Same process for every model. ",
-         "60 passes through the dataset, identical settings, so the comparison is fair."),
+    bullets(s, Inches(7.6), y + Inches(0.1), Inches(5.0), step=0.85, items=[
+        ("A new public dataset. ",
+         f"{DATASET_IMAGES} images, four classes: bolt, nut, screw, washer."),
+        ("Three configurations trained. ", "Two backbones, two resolutions."),
     ])
 
-    txt(s, M, H - Inches(1.35), BODY_W, Inches(0.65),
-        [(f"Both trained in {TRAIN_TIME} on a cloud GPU, same backbone at two resolutions.",
+    txt(s, M, H - Inches(1.2), BODY_W, Inches(0.55),
+        [(f"Both shipped configurations trained in {TRAIN_TIME} on a cloud GPU.",
           {"color": INK}),
-         (f"A larger backbone, YOLO11s ({WEIGHTS_S_MB} MB against {WEIGHTS_N_MB} MB), was "
-          "also evaluated at 640 px and kept in reserve - the smaller one comfortably meets "
-          "the camera's real-time budget, so it shipped.",
-          {"color": MUTED, "size": 13})],
+         (f"A third, YOLO11s ({WEIGHTS_S_MB} MB vs {WEIGHTS_N_MB} MB), was also evaluated "
+          "at 640 px.", {"color": MUTED, "size": 13})],
         size=14, space_after=3, line=1.15)
     notes(s, "Dataset: a public Roboflow fastener export (ARG_Bolts_FV), registered as "
              "arg-bolts-4 -- a different dataset from the self-collected arena set on slide "
@@ -158,45 +155,29 @@ def slide_software(prs):
     s, y = slide_base(prs, KICKER, "The released software",
                       "Version 0.3.0 - one class to import, and five calls to know")
 
-    bullets(s, M, y + Inches(0.02), BODY_W, step=0.5, items=[
-        ("Published on GitHub and installed on the robot. ",
-         "Two commands install a 90 KB software package and a 4.5 MB trained model, "
-         "both checksummed so a download can be verified."),
-        ("The version is pinned. ",
-         "The software records which model it expects, so it always runs the right one."),
+    bullets(s, M, y + Inches(0.05), BODY_W, step=0.55, items=[
+        ("Published on GitHub, version pinned. ",
+         "90 KB software package + 4.5 MB trained model, checksummed."),
     ])
 
-    txt(s, M, y + Inches(1.14), BODY_W, Inches(0.3),
+    txt(s, M, y + Inches(0.75), BODY_W, Inches(0.3),
         "WHAT THE ROBOT'S PROGRAM CALLS", size=12, bold=True, color=ACCENT)
 
-    calls(s, M, y + Inches(1.52), BODY_W, step=0.52, items=[
-        ("Vision(hef=...)  ",
-         "opens the camera and the accelerator. Called once, at start-up."),
-        (".zone_blocked()  ",
-         "yes or no - confirmed debris in the strip of floor ahead. Drives the speed "
-         "rule: slow when yes, full speed when no (FR-4)."),
-        (".age  ",
-         "seconds since the last result. Watched so a stalled camera is never read as a "
-         "clear floor."),
-        (".latest()  ",
-         "every object seen this frame - identity, confidence, position. For logging "
-         "or drawing, not for the speed decision."),
-        (".detail()  ",
-         "the full record, on request: everything above plus timing and camera state. "
-         "Off the control path, so the loop stays cheap."),
+    calls(s, M, y + Inches(1.13), BODY_W, step=0.5, items=[
+        ("Vision(hef=...)  ", "opens the camera and the accelerator, at start-up."),
+        (".zone_blocked()  ", "confirmed debris in the strip ahead (FR-4)."),
+        (".age  ", "seconds since the last result."),
+        (".latest()  ", "objects seen this frame - identity, confidence, position."),
+        (".detail()  ", "full record, on request - timing and camera state."),
     ])
-
-    txt(s, M, H - Inches(1.02), BODY_W, Inches(0.4),
-        "It reports. It does not drive, steer, or talk to the motor controller - "
-        "those calls stay with the robot team.",
-        size=13, color=MUTED)
     notes(s, "The class is fodcv.runtime.vision.Vision, used as a context manager (a with "
              "block) so the camera and accelerator are always released. zone_blocked() and "
              "age are what the control loop reads every poll; latest() and detail() are "
-             "opt-in and do not change what the loop computes. Deliberately no serial, no "
-             "metres, no steering: collection is passive, so a boolean is the whole control "
-             "input. Installed and verified on the Pi 5 with camera and accelerator on "
-             "6 September.")
+             "opt-in and do not change what the loop computes. It reports; it does not drive, "
+             "steer, or talk to the motor controller -- those calls stay with the robot team. "
+             "Deliberately no serial, no metres, no steering: collection is passive, so a "
+             "boolean is the whole control input. Installed and verified on the Pi 5 with "
+             "camera and accelerator on 6 September.")
 
 
 def slide_measured(prs):
@@ -219,18 +200,17 @@ def slide_measured(prs):
         "A frame from the live session on the robot.",
         size=12, color=MUTED)
 
-    txt(s, M, H - Inches(1.75), BODY_W, Inches(0.9),
-        [("Compressing the model to 8-bit for the accelerator costs under 1% of its accuracy, "
-          "and inference finishes well inside the camera's frame - the camera, not the model, "
-          "sets the speed.", {"color": INK}),
-         ("Measured on held-out images from the same dataset: a fair number for comparing "
-          "models, not a prediction of accuracy on the real arena floor.", {"color": ACCENT})],
-        size=14, space_after=4)
+    txt(s, M, H - Inches(1.1), BODY_W, Inches(0.5),
+        "Measured on the model's own held-out images, not the arena floor.",
+        size=14, color=ACCENT)
     notes(s, "Accuracy and latency: RESULT.md Current build, 200 images of the run's own eval "
              "split, against the full-precision model's 0.7769. Live figures: a 3,294-frame "
              "session on the board, runs/camera_hailo/timings.csv. The two latency numbers are "
              "different measurements - the 24.4 ms is the benchmark harness; the live camera's "
-             "own inference stage is about 15 ms inside a 33.3 ms sensor frame.")
+             "own inference stage is about 15 ms inside a 33.3 ms sensor frame. Quantization "
+             "cost: 0.7715 against the full-precision model's 0.7769, under 1%. Inference "
+             "finishes well inside the camera's own 33 ms frame -- the camera, not the model, "
+             "sets the live speed.")
 
 
 def slide_next(prs):
@@ -238,41 +218,36 @@ def slide_next(prs):
     s, y = slide_base(prs, KICKER, "Next, and what needs a decision",
                       "The vision side is usable now; the remaining items are data and hardware")
 
-    band(s, M, y, Inches(5.75), Inches(1.15))
-    txt(s, M + Inches(0.25), y + Inches(0.2), Inches(5.25), Inches(0.8),
+    band(s, M, y, Inches(5.75), Inches(1.0))
+    txt(s, M + Inches(0.25), y + Inches(0.18), Inches(5.25), Inches(0.7),
         [("The robot team can start now", {"bold": True, "size": 16}),
-         ("Building and testing the speed loop against a fixed, installed interface.",
-          {"color": MUTED, "size": 13})],
+         ("Building and testing the speed loop.", {"color": MUTED, "size": 13})],
         space_after=3)
 
-    band(s, Inches(6.85), y, Inches(5.75), Inches(1.15))
-    txt(s, Inches(7.1), y + Inches(0.2), Inches(5.25), Inches(0.8),
+    band(s, Inches(6.85), y, Inches(5.75), Inches(1.0))
+    txt(s, Inches(7.1), y + Inches(0.18), Inches(5.25), Inches(0.7),
         [("Next on the vision side: our own arena data", {"bold": True, "size": 16}),
-         ("2,000 to 2,500 images collected in the test arena, grouped by scene when split.",
-          {"color": MUTED, "size": 13})],
+         ("2,000 to 2,500 images from the test arena.", {"color": MUTED, "size": 13})],
         space_after=3)
 
-    txt(s, M, y + Inches(1.45), BODY_W, Inches(0.35),
+    txt(s, M, y + Inches(1.3), BODY_W, Inches(0.35),
         "THREE DECISIONS BELONG TO THE TEAM", size=12, bold=True, color=ACCENT)
 
-    bullets(s, M, y + Inches(1.85), BODY_W, step=0.82, items=[
-        ("Where the camera sits on the chassis - height and tilt. ",
-         "Open (O-3). Until it is fixed, the strip of floor the system watches is a placeholder rather than a measurement."),
-        ("How wide the camera sees, and how far ahead it looks. ",
-         "Both unmeasured (M-3). They set how much warning the robot gets before it reaches an object."),
-        ("Metal versus non-metal, against a single detection class. ",
-         "One requirement asks the robot to tell them apart (FR-13); another asks the detector to learn one class only (FR-3). "
-         "With one class, the report-but-do-not-collect action can never fire."),
+    bullets(s, M, y + Inches(1.68), BODY_W, step=0.6, items=[
+        ("Camera height and tilt on the chassis. ", "Open (O-3)."),
+        ("Camera field of view and lookahead distance. ", "Unmeasured (M-3)."),
+        ("Metal versus non-metal detection. ",
+         "Conflicts with the single-class requirement (FR-13, FR-3)."),
     ])
-
-    txt(s, M, H - Inches(0.95), BODY_W - Inches(1.2), Inches(0.35),
-        "The public dataset cannot teach the model to ignore ordinary floor clutter.",
-        size=14, color=MUTED)
-    notes(s, "Arena data is PRD section 10. Scene-grouped splitting matters because images from "
-             "one camera lock are near-identical; shuffling per image puts the same scene on both "
-             "sides and inflates the held-out score. O-3 and M-3 are open items in the handoff "
-             "document. FR-13 against FR-3 needs a team decision before anything downstream "
-             "branches on the action.")
+    notes(s, "Arena data is PRD section 10. Scene-grouped splitting matters because images "
+             "from one camera lock are near-identical; shuffling per image puts the same "
+             "scene on both sides and inflates the held-out score -- the public dataset "
+             "cannot teach the model to ignore ordinary floor clutter either way. O-3: until "
+             "camera height and tilt are fixed, the lookahead strip is a placeholder, not a "
+             "measurement. M-3: field of view and lookahead distance set how much warning the "
+             "robot gets before it reaches an object. FR-13 vs FR-3: with one class, the "
+             "report-but-do-not-collect action can never fire -- needs a team decision before "
+             "anything downstream branches on it.")
 
 
 def build():
