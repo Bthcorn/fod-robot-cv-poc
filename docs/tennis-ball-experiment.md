@@ -145,12 +145,28 @@ source and small gaps between them mean nothing.
 
 ### Results
 
-_Not yet run._
+**Result, 2026-11-03 (RunPod, RTX A6000 48 GB, US-KS-2, CUDA torch 2.9.1+cu128).**
+Both runs full 60 epochs, `batch=16`, `seed=0`, `patience=0`. Scored against the
+same-source test split (195 images, 159 instances) at the size each was trained
+at. test-split figures are `fodcv-eval`'s class-agnostic mAP50.
 
 | run | imgsz | own-val mAP50 | test-split mAP50 | recall @0.25 |
 |---|---|---|---|---|
-| `tennis-ball-1-neg-n-320` | 320 | | | |
-| `tennis-ball-1-neg-n-480` | 480 | | | |
+| `tennis-ball-1-neg-n-320` | 320 | 0.9441 | 0.9513 | 0.931 (n=159) |
+| `tennis-ball-1-neg-n-480` | 480 | 0.9486 | 0.9430 | 0.937 (n=159) |
+
+**It is a tie, so 480 wins.** 320 is 0.008 higher on test-split mAP50, 480 is
+0.006 higher on recall — both gaps are noise from the same source and neither is
+the "wide margin" that would declare 320 the loser. The tie-break rule applies
+unchanged: 480 is 1.87× faster on the Hailo-8, leaves the control loop its 8 ms,
+and the conf-0.001 silent-zero bug is 640-specific. **Stage 3 compiles the 480
+model** (`runs/tennis-ball-1-neg-n-480/weights/best.pt`), when the DFC wheel is
+supplied.
+
+These numbers measure nothing about generalisation — same source, no
+cross-dataset holdout (ADR-0003). The board run (Stage 3) is the only honest
+verdict. Both `best.pt` and full run dirs were pulled back to the Mac; the pod
+was terminated.
 
 ## Stage 3 — the board
 
