@@ -50,9 +50,23 @@ set -euxo pipefail
 # ~18 min into place-and-route. Default it once, here.
 export USER="${USER:-root}"
 
+# A minimal pod/container ships no generated locale, and whatever LANG/LC_* it
+# does set often names one that does not exist. The DFC's place-and-route backend
+# is C++ and constructs a std::locale from the environment: an invalid name there
+# throws `locale::facet::_S_create_c_locale name not valid` and the compile dies
+# -- but only ~8 min in, AFTER quantization-aware fine-tuning and Layer Noise
+# Analysis have already run, so the cost of hitting it is an entire wasted QAT.
+# C.UTF-8 is built into glibc (no locale-gen needed) and is always valid. Force
+# it for every child process here rather than trusting the container's env.
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 sudo apt-get update
+# python3.10-dev / python3-tk / libgraphviz-dev: the DFC's own post-install
+# requirement check warns (non-fatally) when these are absent; install them so
+# the one-shot log is clean and nothing surprises a later graph/plot step.
 sudo apt-get install -y --no-install-recommends \
-  build-essential libgl1 libglib2.0-0 graphviz python3.10-venv curl ca-certificates
+  build-essential libgl1 libglib2.0-0 graphviz libgraphviz-dev \
+  python3.10-venv python3.10-dev python3-tk locales curl ca-certificates
 
 # Wheel resolution runs after apt because the fallback needs curl.
 WHEEL_NAME=hailo_dataflow_compiler-3.34.0-py3-none-linux_x86_64.whl
