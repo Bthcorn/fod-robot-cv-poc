@@ -67,6 +67,22 @@ operator's call and nobody else's.
 Disk is the one that bites. A pod template sized for training alone will run out
 during the DFC install, ~10 h in.
 
+### Capacity: a 4090 is not there for the asking
+
+This file is written as if the Pod spec above can be rented on demand. Tonight it
+could not. 42 GPU/cloud combinations at or below $1.00/hr were refused on
+capacity — every cheap card from A2000 ($0.12) through A6000 ($0.33) — and the
+box that finally created was an **A40 48 GB in EU-SE-1 at $0.59/hr**, not a 4090.
+An A40 runs this sweep unchanged (more VRAM, same `batch=16`), so the fair
+comparison holds; the only cost is price and that it is x86_64 Linux, which is
+all the compile needs.
+
+And **do not trust `get-capacity`.** It reported the A40 as *unavailable*, then
+`create-pod` succeeded on that exact card seconds later. Trust the `create-pod`
+call, not the capacity query: iterate `create-pod` across cards/regions until one
+lands, rather than pre-filtering on a query that lies. Budget for not getting a
+4090, or any one specific card, on a given night.
+
 ---
 
 ## Stage 0 — setup
