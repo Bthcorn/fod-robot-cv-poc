@@ -385,6 +385,7 @@ Each one line, each carrying the number that justifies it. This is where the sup
 - **Any sweep taken with a desktop session live.** It cost NCNN FP16 ~16% and nothing in `conditions.txt` catches it.
 - **The `s` a8-vs-a16 comparison (0.0313 → 0.6549).** Both builds sit at a 0.001 floor, inside the band that independently zeroes `n`. Until `s` a8 is rebuilt at 0.0001, that pair cannot separate the flag from the floor.
 - **Live per-frame detection counts** from `fodcv-hailo-camera`. They sum `CONFIRM`, `CAUTION` and `IGNORE` tracks, so they count what `policy.py` already discards. Ranking builds by them is meaningless.
+- **Anything from the tennis-ball experiment, as a FOD number.** A tennis ball is a Demo Object, not FOD — `docs/adr/0001`. It is ~67 mm, fluorescent and spherical against a 40 mm dark matte screw, so it is a far easier target, and its dataset ships no cross-dataset holdout at all. Those results live in `docs/tennis-ball-experiment.md` and are evidence about the *toolchain*. Mixing them into this file is the specific mistake that separation exists to prevent.
 
 ---
 
