@@ -250,9 +250,27 @@ def test_an_empty_label_file_stays_empty(tmp_path):
 def test_the_roboflow_exports_carry_their_own_split():
     """YoloSource has no val_fraction to set: the shipped train/valid cut is the
     one every published mAP on these datasets was measured against."""
-    for name in ("arg-bolts-4", "fastener-7"):
+    for name in ("arg-bolts-4", "fastener-7", "tennis-ball-1-neg"):
         assert not hasattr(source(name), "val_fraction")
         assert source(name).source_dir.name.endswith(".yolov11")
+
+
+def test_the_tennis_ball_is_one_class_named_for_its_action_key():
+    """The Demo Object's class name is also its ACTIONS key, and the action is
+    REPORT -- the drum is a magnet and a tennis ball is rubber, so PICK would be
+    a false claim in the one table that says what the robot can do.
+
+    docs/adr/0001 and docs/adr/0004. Pinned as a test because the export itself
+    names the class `tennis-ball`, and taking the vendor's string verbatim would
+    silently fall through ACTIONS to IGNORE.
+    """
+    from fodcv.runtime import policy
+
+    names = source("tennis-ball-1-neg").class_names
+    assert names == {0: "tennis_ball"}
+    assert policy.action(names[0]) == "REPORT"
+    # The vendor's own spelling must not be what the model learns to call it.
+    assert policy.action("tennis-ball") == "IGNORE"
 
 
 def test_fod_a_7_splits_the_unknown_bucket_without_changing_the_image_set():

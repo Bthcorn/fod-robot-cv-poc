@@ -165,6 +165,39 @@ SOURCES["fastener-7"] = YoloSource(
     class_names={0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "J"},
 )
 
+# --- Demo Object: the tennis ball ---
+#
+# Not FOD, and deliberately not labelled as such -- see docs/adr/0001. The
+# thesis problem is unchanged; this is what gets put on the floor at a
+# demonstration, and a second independently-sourced dataset carried through the
+# toolchain is the evidence the README's claim actually needs.
+#
+# `-1-neg` reads as `fod-a-1-neg` does, because it is the same thing for the
+# same reason: one class, with background images. 1,562 of its 2,970 train
+# labels are empty (53%). That is why this export was chosen over the other
+# four candidates -- `plan-b3-1class` scored 60/60 on the clean holdout and
+# still put 793 boxes on 120 frames of an empty room, having never seen an
+# image with nothing in it.
+#
+# `tennis_ball`, not the export's `tennis-ball`: it is also an ACTIONS key, and
+# ACTIONS maps it to REPORT, not PICK -- the drum is a magnet and this is
+# rubber. docs/adr/0004.
+#
+# Two measured properties that decide how it may be used, both from the export
+# itself (README.roboflow.txt and the label files):
+#   - Every image is 320x240 ("Resize to 320x240 (Fill with center crop)"), so
+#     640 would upsample and buy nothing. The runs are 320 and 480. ADR-0005.
+#   - "3 versions of each source image", so 2,970 train images are roughly 990
+#     sources. Its own valid/ split is therefore not scene-disjoint, and no
+#     cross-dataset holdout exists -- the planned second source publishes no
+#     export. ADR-0003 records what that costs.
+SOURCES["tennis-ball-1-neg"] = YoloSource(
+    source_dir=Path("~/Downloads/detect-tennis-ball-with-null.v1i.yolov11").expanduser(),
+    class_names={0: "tennis_ball"},
+)
+
+
+
 
 def source(dataset: str = CURRENT_DATASET) -> VocSource | YoloSource:
     known = ", ".join(sorted(SOURCES))

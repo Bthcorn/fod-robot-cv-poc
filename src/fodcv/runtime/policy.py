@@ -64,6 +64,13 @@ ACTIONS = {
     "washer": "PICK",  # ferrous like the rest -- the magnet lifts it
     "fod": "PICK",
     "unknown": "REPORT",  # 53% of FOD-A and the class that fires on furniture
+    # A Demo Object, not FOD -- docs/adr/0001. REPORT and not PICK because every
+    # PICK above is a claim that the magnetic drum can lift the thing, and this
+    # one is rubber and felt. PICK here would be a false statement in the one
+    # table that says what the robot can do, and fodnav drives at a CONFIRM
+    # track whose action is PICK -- so the robot would chase a ball it cannot
+    # collect. REPORT is true: detect it, log it, claim nothing.
+    "tennis_ball": "REPORT",
 }
 
 
