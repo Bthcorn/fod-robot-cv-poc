@@ -66,8 +66,11 @@ class Report:
     map50_95: float  # class-agnostic
     map50: float  # class-agnostic
     conf: float
-    # holdout class name -> (recall at `conf`, ground-truth instances). Empty for
-    # a 1-class model, where per-class recall is not defined.
+    # holdout class name -> (recall at `conf`, ground-truth instances). Empty
+    # when per-class recall is not defined: a 1-class model scored against a
+    # multi-class holdout cannot say which class it found. Empty means
+    # "undefined", NOT "zero" -- see evaluate.
+    #
     recall: dict[str, tuple[float, int]]
     background_frames: int | None = None
     false_positives: int | None = None
@@ -157,7 +160,13 @@ def evaluate(frames: list[Frame], holdout: dict[int, str],
         _cat(tp, (0, len(IOUV))), _cat(confs, (0,)), _cat([np.zeros_like(c) for c in confs], (0,)),
         np.zeros(len(gt_cls), dtype=int),
     )
-    recall = _recall(_cat(tp_at_conf, (0, len(IOUV))), _cat(cls_at_conf, (0,)), gt_cls, holdout)
+    # Not computed at all when there is no class mapping, rather than computed
+    # from nothing: `_recall` answers an empty prediction array with 0.0 for
+    # every class, which is the right answer for a model that found nothing and
+    # a silently wrong one for a model whose classes were never mapped. The
+    # second case is "undefined", and format_report prints it as n/a.
+    recall = (_recall(_cat(tp_at_conf, (0, len(IOUV))), _cat(cls_at_conf, (0,)), gt_cls, holdout)
+              if to_holdout else {})
     return Report(run="", images=len(frames), map50_95=map50_95, map50=map50,
                   conf=conf, recall=recall)
 
@@ -223,10 +232,21 @@ def score(weights: Path, eval_dir: Path, conf: float = 0.25, imgsz: int = 480,
 
     model = YOLO(str(weights))
     holdout = holdout_names(eval_dir / "data.yaml")
-    # A 1-class model has no per-class recall to report; anything else is mapped
-    # into the holdout's class space so both sides name the same boxes.
-    to_holdout = ({} if len(model.names) == 1
-                  else {i: holdout_class(n, holdout) for i, n in model.names.items()})
+    # Anything multi-class is mapped into the holdout's class space so both
+    # sides name the same boxes.
+    #
+    # A 1-class model against a multi-class holdout has no per-class recall that
+    # means anything -- its one `fod` class cannot say which of nail/screw/bolt
+    # it found -- so it maps to nothing and the recall block is omitted. But a
+    # 1-class model against a 1-class holdout is the unambiguous case: there is
+    # exactly one thing it could have found. Mapping it makes the tennis-ball
+    # runs report a real recall instead of an omission.
+    if len(model.names) > 1:
+        to_holdout = {i: holdout_class(n, holdout) for i, n in model.names.items()}
+    elif len(holdout) == 1:
+        to_holdout = {next(iter(model.names)): next(iter(holdout))}
+    else:
+        to_holdout = {}
 
     frames = predict_frames(model, eval_dir, imgsz)
     report = evaluate(frames, holdout, to_holdout, conf)
@@ -256,7 +276,13 @@ def _background(model, background_dir: Path | None, conf: float,
 
 def format_report(r: Report) -> str:
     lines = [
-        f"{r.run}  ({r.images} holdout images, scene-disjoint)",
+        # "scene-disjoint" used to be printed here unconditionally. It is a
+        # property of the directory passed in, not of the scorer: true for
+        # artifacts/poc-v2-480/eval, false for a Roboflow export's own test
+        # split, and this function cannot tell them apart. Claiming it for
+        # every eval dir is how an own-source number gets quoted as a
+        # generalisation result.
+        f"{r.run}  ({r.images} eval images)",
         f"  class-agnostic mAP50-95  {r.map50_95:.4f}",
         f"  class-agnostic mAP50     {r.map50:.4f}",
     ]
@@ -266,7 +292,8 @@ def format_report(r: Report) -> str:
             note = "  (no instances in holdout)" if total == 0 else ""
             lines.append(f"    {name:<12} {rec:.3f}  n={total}{note}")
     else:
-        lines.append("  recall @ conf: n/a -- 1-class model, no per-class recall")
+        lines.append("  recall @ conf: n/a -- 1-class model against a "
+                     "multi-class holdout, no per-class recall is defined")
     if r.fp_per_frame is None:
         lines.append("  FP/background frame: n/a -- pass --background <dir> of empty Pi frames")
     else:

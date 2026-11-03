@@ -7,6 +7,7 @@ import torch
 
 import pytest
 
+from fodcv.research import eval as eval_module
 from fodcv.research.eval import Frame, evaluate, holdout_class, load_labels, match
 
 HOLDOUT = {0: "nail", 1: "screw", 2: "bolt", 3: "unknown"}
@@ -116,3 +117,38 @@ def test_a_class_confusion_is_a_recall_miss_but_not_an_agnostic_miss():
     r = evaluate([frame([0], [0.9], gt, [1], gt)], HOLDOUT, {0: 0}, 0.25)
     assert r.map50 == pytest.approx(PERFECT)
     assert r.recall["screw"] == (0.0, 1)
+
+
+def test_an_unmapped_model_reports_no_recall_rather_than_zero_recall():
+    """`evaluate` is handed an empty class map when a 1-class model is scored
+    against a multi-class holdout, because its one class cannot say which of
+    nail/screw/bolt it found.
+
+    The trap: `_recall` answers an empty prediction array with 0.0 for every
+    class, which is correct for a model that found nothing and silently wrong
+    for a model whose classes were never mapped. Both used to render as
+    `screw 0.000 n=47` beside a healthy mAP -- a plausible number next to a real
+    instance count, which is the worst shape a wrong number can take.
+    """
+    gt = box(10, 10, 50, 50)
+    r = evaluate([frame([0], [0.9], gt, [1], gt)], HOLDOUT, {}, 0.25)
+    assert r.recall == {}
+    assert r.map50 > 0  # the class-agnostic half is unaffected and still real
+    assert "n/a" in eval_module.format_report(r)
+
+
+def test_a_model_that_found_nothing_still_reports_zero_recall():
+    """The other side of the test above: an empty prediction set with a class
+    map present is a genuine zero, not an omission."""
+    gt = box(10, 10, 50, 50)
+    r = evaluate([frame([], [], torch.zeros((0, 4)), [1], gt)], HOLDOUT, {1: 1}, 0.25)
+    assert r.recall["screw"] == (0.0, 1)
+
+
+def test_the_report_does_not_claim_scene_disjointness_it_cannot_check():
+    """Scene-disjointness is a property of the directory passed in -- true for
+    artifacts/poc-v2-480/eval, false for a Roboflow export's own test split --
+    and the formatter cannot tell them apart."""
+    r = evaluate([frame([1], [0.9], box(10, 10, 50, 50), [1], box(10, 10, 50, 50))],
+                 HOLDOUT, {1: 1}, 0.25)
+    assert "scene-disjoint" not in eval_module.format_report(r)
