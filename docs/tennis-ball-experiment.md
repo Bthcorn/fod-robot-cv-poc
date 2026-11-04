@@ -178,6 +178,18 @@ this one has one.
 
 Then `fodcv-hailo-camera --preview` on the Pi, with a ball on the floor.
 
+**Compile done, 2026-11-04 (RunPod A40, EU-SE-1).** The 480 winner compiled to
+`artifacts/tennis-ball-1-neg-480/bench_int8_hailo_model/best.hef` (7.96 MB) with
+`HEF_RUN=tennis-ball-1-neg-480 HEF_DATASET=tennis-ball-1-neg HEF_IMGSZ=480
+HEF_CONF=0.0001 HEF_FRACTION=1.0 HEF_GPU=1`, calibrated on the 1,485-image
+sorted head (= fraction 0.5 of train, above Hailo's 1,024 floor), no `--a16-cls`.
+QAT and Layer Noise Analysis ran on the GPU; place-and-route settled at 3
+contexts. `nms_config.json` confirms `image_dims [480, 480]`, `nms_scores_th
+0.0001`, The full procedure, and every wall that made the first
+attempt fail, is in `docs/tennis-ball-hef-oneshot.md`. The `.hef` is on the Mac
+(gitignored); the pod was terminated. This proves it **built**, nothing more
+(ADR-0006, `bfcccc7`) — the board run below is still the only honest verdict.
+
 **This is the experiment's only honest verdict.** It is on the real mount, at
 the real distance, over the real floor. No val mAP in this document answers the
 question it answers. Watch for the pre-registered failure in ADR-0006: false
