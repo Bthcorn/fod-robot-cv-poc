@@ -15,8 +15,8 @@ threshold discards real detections whenever the angle is unfavourable. Instead:
 
 The states are *confidence over time*, and deliberately not the same axis as what
 the robot should do about an object -- that is `ACTIONS`, keyed by class name. A
-CAUTION screw and a CAUTION shard both mean "slow down"; only the class says which
-one the magnet can lift. Fusing the two into one enum loses the half FR-4 needs.
+CAUTION ball and a CAUTION shard both mean "slow down"; only the class says which
+one the collector should pick. Fusing the two into one enum loses the half FR-4 needs.
 
 stdlib only, on purpose: this ships to the Pi's system python3.11, where neither
 ultralytics nor torch exists. `fodcv.runtime.vision` is what drives it there;
@@ -60,17 +60,16 @@ ACTIONS = {
     "nail": "PICK",
     "screw": "PICK",
     "bolt": "PICK",
-    "nut": "PICK",     # arg-bolts-4, the deployed taxonomy
-    "washer": "PICK",  # ferrous like the rest -- the magnet lifts it
+    "nut": "PICK",     # arg-bolts-4, the legacy FOD taxonomy
+    "washer": "PICK",  # legacy FOD taxonomy
     "fod": "PICK",
     "unknown": "REPORT",  # 53% of FOD-A and the class that fires on furniture
-    # A Demo Object, not FOD -- docs/adr/0001. REPORT and not PICK because every
-    # PICK above is a claim that the magnetic drum can lift the thing, and this
-    # one is rubber and felt. PICK here would be a false statement in the one
-    # table that says what the robot can do, and fodnav drives at a CONFIRM
-    # track whose action is PICK -- so the robot would chase a ball it cannot
-    # collect. REPORT is true: detect it, log it, claim nothing.
-    "tennis_ball": "REPORT",
+    # The pivot target -- docs/adr/0008. PICK means "go collect this", and PICK
+    # is now mechanism-agnostic: the magnet is retired (D2) and the collector is
+    # OPEN-1, so PICK no longer claims any particular lifting mechanism. fodnav
+    # drives at a CONFIRM track whose action is PICK, which is exactly what the
+    # robot should do with the ball once a collector is chosen.
+    "tennis_ball": "PICK",
 }
 
 

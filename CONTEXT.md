@@ -1,5 +1,11 @@
 # FOD Robot CV
 
+> **Pivot in progress (2026-11-04, ADR-0008).** The detection target has moved
+> from metal FOD to the **tennis ball**, permanently. The magnetic collector is
+> retired, `PICK` is redefined mechanism-agnostic, and the research thesis is
+> being redesigned (OPEN-2). Entries below marked _(historical)_ or _(original
+> problem)_ describe the pre-pivot framing and are kept to explain older docs.
+
 The vision half of the FOD Robot thesis: turning labelled images into a detector
 the robot can run, and measuring whether it works. This context owns datasets,
 training runs, exported artifacts, and the detection-to-action policy. It does
@@ -9,18 +15,21 @@ not own navigation or chassis control — those live in `fodnav`.
 
 ### The problem
 
-**FOD**:
+**FOD** _(original problem — see ADR-0008)_:
 Foreign Object Debris — loose material on a surface an aircraft operates on,
-which can damage an aircraft or injure a person. The problem this project
-exists to address.
+which can damage an aircraft or injure a person. The problem the project was
+originally built around. The project has since pivoted its detection target to
+the tennis ball (ADR-0008); what real-world problem now frames the work is open
+(OPEN-2).
 _Avoid_: debris, foreign object damage (that is FO*D*amage, the consequence,
 not the object)
 
-**Demo Object**:
-An object substituted for real FOD when demonstrating the system, chosen for
-visibility and availability rather than realism. A tennis ball is one. A Demo
-Object is never evidence that the system detects FOD.
-_Avoid_: target, test object (that term is reserved — see Test Object)
+**Demo Object** _(historical — see ADR-0008)_:
+Under the original FOD framing, an object substituted for real FOD when
+demonstrating the system, chosen for visibility and availability rather than
+realism. The tennis ball was one. The pivot (ADR-0008) made the tennis ball the
+project's actual detection target rather than a stand-in, so this term no longer
+describes it; it is kept only to explain pre-pivot docs.
 
 **Test Object**:
 One of the specific items FAA AC 150/5210-24 names for certifying FOD removal
@@ -66,14 +75,16 @@ confidence over time, Action is capability. A class that is not listed is
 IGNORE.
 
 **PICK**:
-The robot can collect this object. Today that means exactly one thing: the
-magnetic drum can lift it, so the class is ferrous. Navigation drives at a
-CONFIRM track whose Action is PICK, so PICK is a claim about hardware, not a
-priority.
+The robot is meant to collect this object — the class the approach behaviour
+drives a CONFIRM track onto. **Mechanism-agnostic**: it names *intent to
+collect*, not a proven capability. It once meant "ferrous, so the magnetic drum
+can lift it"; the pivot off FOD retired that drum (ADR-0008), so *which*
+collector does the collecting is now open (OPEN-1). Until a collector is chosen
+and measured, PICK is a claim about intent, not hardware.
 
 **REPORT**:
 Detected and logged, not collected — whether because the identification is
-uncertain or because the object is real but not liftable. Addresses the gap
+uncertain or because the object is real but not collectable. Addresses the gap
 FAA AC 150/5210-24 records, that FOD locations go unrecorded during manual
 inspection.
 

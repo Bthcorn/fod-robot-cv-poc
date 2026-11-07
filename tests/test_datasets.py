@@ -256,19 +256,19 @@ def test_the_roboflow_exports_carry_their_own_split():
 
 
 def test_the_tennis_ball_is_one_class_named_for_its_action_key():
-    """The Demo Object's class name is also its ACTIONS key, and the action is
-    REPORT -- the drum is a magnet and a tennis ball is rubber, so PICK would be
-    a false claim in the one table that says what the robot can do.
+    """The pivot target's class name is also its ACTIONS key, and the action is
+    PICK -- it is the thing the robot goes to collect. PICK is mechanism-agnostic
+    now (the magnet is retired, the collector is OPEN-1).
 
-    docs/adr/0001 and docs/adr/0004. Pinned as a test because the export itself
-    names the class `tennis-ball`, and taking the vendor's string verbatim would
-    silently fall through ACTIONS to IGNORE.
+    docs/adr/0008 (supersedes 0001/0004). Pinned as a test because the export
+    itself names the class `tennis-ball`, and taking the vendor's string verbatim
+    would silently fall through ACTIONS to IGNORE.
     """
     from fodcv.runtime import policy
 
     names = source("tennis-ball-1-neg").class_names
     assert names == {0: "tennis_ball"}
-    assert policy.action(names[0]) == "REPORT"
+    assert policy.action(names[0]) == "PICK"
     # The vendor's own spelling must not be what the model learns to call it.
     assert policy.action("tennis-ball") == "IGNORE"
 
