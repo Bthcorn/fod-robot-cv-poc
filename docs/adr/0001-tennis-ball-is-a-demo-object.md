@@ -1,5 +1,10 @@
 # The tennis ball is a Demo Object, not a change of problem
 
+**Status:** superseded by ADR-0008 (2026-11-04). The project *did* later pivot:
+the tennis ball is now the detection target, not a Demo Object, and FOD is no
+longer the problem. This ADR is kept to explain pre-pivot docs and the reasoning
+that was reversed.
+
 A future reader finding a tennis-ball dataset in a FOD repository will assume
 the project pivoted. It did not. FOD remains the problem, the users and the
 thesis; the tennis ball is a Demo Object — what gets put on the floor during a

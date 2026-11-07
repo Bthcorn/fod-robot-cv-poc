@@ -1,7 +1,12 @@
 # The tennis-ball demo runs on the board, camera only
 
-**Status:** accepted, not yet executed — the training half comes first; the
-compile and the board run are deferred to a later session.
+**Status:** accepted; reframed by ADR-0008 (2026-11-04). The board run is no
+longer a *demo* step — after the pivot it is the hard prerequisite that gates
+making the tennis model the shipping line (D5). The "the magnetic drum cannot
+lift a sphere, so never drive the robot at the ball" reasoning below is overtaken
+by the pivot: the project now *does* intend to collect the ball, by a non-magnetic
+collector that is still open (OPEN-1). The camera-only scope of this ADR still
+holds until that collector exists.
 
 The demonstration is a Pi 5 + Hailo-8 running `fodcv-hailo-camera --preview`
 against a tennis ball on the floor. Not a laptop running `best.pt`, and not the

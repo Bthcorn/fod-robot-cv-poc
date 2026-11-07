@@ -180,8 +180,9 @@ SOURCES["fastener-7"] = YoloSource(
 # image with nothing in it.
 #
 # `tennis_ball`, not the export's `tennis-ball`: it is also an ACTIONS key, and
-# ACTIONS maps it to REPORT, not PICK -- the drum is a magnet and this is
-# rubber. docs/adr/0004.
+# since the pivot ACTIONS maps it to PICK -- it is the detection target now, and
+# PICK is mechanism-agnostic (the magnet is retired, the collector is OPEN-1).
+# docs/adr/0008.
 #
 # Two measured properties that decide how it may be used, both from the export
 # itself (README.roboflow.txt and the label files):
