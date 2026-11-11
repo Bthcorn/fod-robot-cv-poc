@@ -1,5 +1,7 @@
 # The tennis-ball demo runs on the board, camera only
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 **Status:** accepted, not yet executed — the training half comes first; the
 compile and the board run are deferred to a later session.
 

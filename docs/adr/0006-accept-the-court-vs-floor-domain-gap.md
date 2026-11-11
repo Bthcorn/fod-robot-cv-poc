@@ -1,5 +1,7 @@
 # Accept the court-vs-floor domain gap; the board demo is the verdict
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 A future reader will reasonably ask why a floor-roving robot is trained on
 tennis footage. This records that the gap was seen, measured against, and
 accepted deliberately.
