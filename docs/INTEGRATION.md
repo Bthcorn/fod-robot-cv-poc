@@ -190,8 +190,8 @@ call it.
 | `box` | `(x0, y0, x1, y1)` `int` px | rotated frame, origin top-left, `y` down, clipped to the frame | every matched frame; the last detection's box, unsmoothed; never `None` from a running `Vision` |
 | `centroid` | `(x, y)` `float` px | box centre, same frame | every matched frame; unsmoothed; the tracker's match key (80 px radius) |
 
-`cls` is diagnostic on purpose. PRD FR-3 mandates one trained class and the arena
-dataset ships that way, at which point `bolt`/`nut`/`screw`/`washer` stop existing.
+`cls` is diagnostic on purpose. PRD v3 FR-3 trains four classes today and leaves open
+whether the arena dataset is one class; if it is, `bolt`/`nut`/`screw`/`washer` stop existing.
 Code branching on `state` and `action` survives the switch untouched. `state` and
 `action` are two fields for a reason: a CAUTION screw and a CAUTION shard both mean
 *slow down*, and only the class says which one the magnet can lift.

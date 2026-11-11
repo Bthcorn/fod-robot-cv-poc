@@ -1,7 +1,7 @@
 # Dataset roadmap — the arena dataset, and what its split still needs
 
 The registry in `src/fodcv/research/datasets.py` currently holds only FOD-A
-(`fod-a`, `fod-a-3k`). The real dataset — PRD §10's ~2000–2500 self-collected
+(`fod-a`, `fod-a-3k`). The real dataset — PRD v3 §10's ~2,000–2,500 self-collected
 arena images — is not registered yet. This file holds its entry and the design
 decisions that must land with it, so `--list` does not fail on a `source_dir`
 that is not there.
@@ -19,12 +19,13 @@ exports YOLO — nothing to download, nothing to convert.
 ),
 ```
 
-**One class, not four.** PRD FR-3 specifies a single trained class,
-`fod`; per-class recall is recovered at evaluation time from the
-seeding log. The 4-class scheme (`nail`/`screw`/`bolt`/`unknown`) belongs to the
+**One class or four: open.** PRD v2 FR-3 specified a single trained class,
+`fod`, with per-class recall recovered at evaluation time from the
+seeding log. PRD v3 FR-3 trains four classes (`bolt`/`nut`/`screw`/`washer`,
+as shipped) and decides one-vs-four for the arena set when it is collected. The 4-class scheme (`nail`/`screw`/`bolt`/`unknown`) belongs to the
 FOD-A comparison only.
 
-## Read PRD §10 step 4 before registering it
+## Read PRD v3 §10 step 5 before registering it
 
 > "Split 70/15/15, grouped so one scene never spans train and test; keep a
 > cross-venue holdout from the machine-shop visit."
