@@ -1,6 +1,6 @@
 # FOD Robot CV — PoC
 
-De-risk the CV toolchain for the FOD Robot thesis (`Software Project/FOD Robot PRD v2`) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
+De-risk the CV toolchain for the FOD Robot thesis (FOD Robot PRD v3, Notion) before investing in real data collection or Pi 5 hardware: prove the libraries install and run, the dataset is gettable/remappable, a train→eval loop completes, and export works.
 
 **Results live in [`RESULT.md`](RESULT.md)** — benchmarks, accuracy, the live-camera findings, and the decisions they produced. This file is setup and how to run, only.
 
@@ -81,11 +81,11 @@ uv run fodcv-prepare --dataset fod-a-3k --force  # rebuild an existing one
 Two source kinds, because the two datasets that matter have nothing in common:
 
 - **`VocSource`** — a Pascal VOC zip on Google Drive, downloaded and converted. FOD-A: 31 categories collapse to the 4-class PoC scheme via `class_map`. `fod-a` and `fod-a-3k` are the same source at different `subset_size`.
-- **`YoloSource`** — an export from a labelling tool that is already YOLO. Nothing to download, nothing to convert; it is copied in and validated (every image has a label, every class id used is declared). PRD §10's ~2000–2500 arena images arrive this way, so `arena-v1` ships as a commented-out template.
+- **`YoloSource`** — an export from a labelling tool that is already YOLO. Nothing to download, nothing to convert; it is copied in and validated (every image has a label, every class id used is declared). PRD v3 §10's ~2,000–2,500 arena images arrive this way, so `arena-v1` ships as a commented-out template.
 
 Preparing writes only to `data/<dataset-id>/` and refuses to overwrite an existing dataset without `--force`, so a second dataset cannot delete the first.
 
-**Before registering the arena dataset, read PRD §10 step 4 and the note above `arena-v1`.** `split()` is a plain per-image shuffle, which is wrong for anything video-derived — see RESULT.md on scene grouping, where FOD-A demonstrates the failure at 74%.
+**Before registering the arena dataset, read PRD v3 §10 step 5 (grouped split) and the note above `arena-v1`.** `split()` is a plain per-image shuffle, which is wrong for anything video-derived — see RESULT.md on scene grouping, where FOD-A demonstrates the failure at 74%.
 
 ## Commands
 
@@ -143,8 +143,8 @@ that, not this section.
 Three things worth knowing from here:
 
 `zone_blocked()` is the whole product. Collection is passive — PRD FR-11 has no gripper
-and no targeting, so nothing steers toward an object and FR-15 makes the homography
-optional. The robot needs one boolean per frame: is a confirmed detection in the strip of
+and no targeting, so nothing steers toward an object and the adaptive-speed loop does not need
+FR-15's homography (only FR-17 does). The robot needs one boolean per frame: is a confirmed detection in the strip of
 floor it is about to drive over. `latest()` returns `Target(id, state, action, cls, conf,
 box, centroid)` for logging and the telemetry heatmap, not for the main path.
 
@@ -207,7 +207,7 @@ variant explicitly, and the script ships whatever it names.
 
 ## Export on the Mac, benchmark on the Pi
 
-Not a convenience — a constraint. `litert-converter` ships **no aarch64 Linux wheel**, so `format=litert` is buildable only on Linux x86_64 and macOS, *never on the Pi itself*. Since PRD AC-3 names TFLite INT8 as one of the three runtimes that must be measured, exporting on the Pi would have silently deleted a required runtime from the results. Inference is fine on the Pi — `ai-edge-litert` publishes aarch64 wheels with the XNNPACK runtime.
+Not a convenience — a constraint. `litert-converter` ships **no aarch64 Linux wheel**, so `format=litert` is buildable only on Linux x86_64 and macOS, *never on the Pi itself*. Since PRD v3 AC-3 judges the deployed runtime against the CPU alternatives and FR-1 keeps TFLite among them, exporting on the Pi would have silently deleted a required comparison runtime from the results. Inference is fine on the Pi — `ai-edge-litert` publishes aarch64 wheels with the XNNPACK runtime.
 
 So `export.py` builds every artifact on the Mac and writes `artifacts/<run-id>/exports.json`; `bench_pi.py` reads that manifest and reuses the artifacts, exporting locally only when one is missing.
 
@@ -279,7 +279,7 @@ Run with the **system** interpreter, not the project venv: `python3-picamera2` i
 
 ## Out of scope
 
-- Real dataset collection and hardware integration — still need the arena per PRD §10.
+- Real dataset collection and hardware integration — still need the arena per PRD v3 §10.
 - ~~**imgsz sweep.**~~ Resolved: 480 over 640 (see RESULT.md). FR-2 wants amending to `imgsz=480`.
 - Benchmarking accelerators *other than* the Hailo-8 — the rest are neither on hand nor budgeted.
 - End-to-end capture→serial latency (M-3): needs `picamera2` + the ESP32 in the loop. This benchmark supplies the *inference* term of that budget, not the total.

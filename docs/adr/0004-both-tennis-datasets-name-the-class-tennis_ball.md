@@ -1,5 +1,7 @@
 # Both tennis datasets name the class `tennis_ball`, and a test enforces it
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 **Status: amended 2025-11-03 — the trap described below does not apply to a
 1-class model.** `research/eval.py:229` reads `to_holdout = {} if
 len(model.names) == 1 else {...}`, so a single-class model never reaches

@@ -1,5 +1,7 @@
 # Train the tennis ball at both 480 and 640; compile only the winner
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 **Status: amended 2025-11-03 — the pair is 320 and 480, not 480 and 640.**
 Every image in the export is **320x240** "Resize to 320x240 (Fill with center
 crop)" per its `README.roboflow.txt`. Training at 640 would upsample a 320-wide

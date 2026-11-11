@@ -1,5 +1,7 @@
 # Tennis dataset zips travel Mac→pod directly, not via a Drive mirror
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 `arg-bolts` reaches a pod through a Google Drive mirror and `gdown`, with the
 file id in `FODCV_DATASET_GDRIVE_ID`. The tennis datasets do not follow that
 pattern. They are fetched once on the Mac with the operator's Roboflow link and

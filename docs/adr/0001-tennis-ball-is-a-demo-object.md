@@ -1,5 +1,7 @@
 # The tennis ball is a Demo Object, not a change of problem
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 A future reader finding a tennis-ball dataset in a FOD repository will assume
 the project pivoted. It did not. FOD remains the problem, the users and the
 thesis; the tennis ball is a Demo Object — what gets put on the floor during a

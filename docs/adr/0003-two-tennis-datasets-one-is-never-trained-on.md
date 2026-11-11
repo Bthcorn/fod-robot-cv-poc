@@ -1,5 +1,7 @@
 # Two tennis-ball datasets; the second one is never trained on
 
+**Superseded 2026-11-11:** the tennis-ball Demo Object is dropped and the tennis pivot (PR #10, never merged) is reverted. FOD stays the target. See the FOD Robot Decision Log, D-12. Kept as history.
+
 **Status: amended 2025-11-03 — the cross-dataset holdout does not exist.**
 `rowerup/tennis-ball-8bsra` offers no downloadable export, so there is no
 second source. In its place the training set's own shipped `test/` split (195
